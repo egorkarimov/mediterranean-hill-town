@@ -1,0 +1,1458 @@
+---
+Part III, Chapter 2: Architecture of the promontory
+Package: src/three/architecture.ts
+Language: TypeScript
+---
+
+# Architecture of the promontory
+
+The town rises from the water in five stepped tiers: the breakwater cove at sea level, the lower coastal ring and Roman viaduct, the central market piazza, the western windmill ridge, and the summit citadel of the Duomo. Every structure is assembled procedurally from the seed and palette, and each interactive or moving part is returned in a `BuiltTownScene` record so the animation loop can drive it on every frame.
+
+## Animated actors of the promontory
+
+Six kinds of actors move across the promontory once the masonry is in place. A `SwayingTree` bends in the sea breeze around its base rotation. A `BoatInstance` either bobs at its mooring in the harbor or sails an elliptical course around the peninsula with a white wake behind its stern. A `SeagullInstance` banks on flapping wings above the cupola. A `SmokePuff` rises and expands from a cottage chimney. A `FountainDrop` arcs out of the marble piazza basin. A `ChimeRing` radiates outward from the Campanile belfry when the bronze bell tolls.
+
+The `BuiltTownScene` interface gathers all of those actors alongside the clickable district meshes and the emissive window and lantern materials whose glow changes with the solar phase.
+
+=>
+
+export interface SwayingTree {
+  readonly mesh: THREE.Object3D
+  readonly baseRotZ: number
+  readonly baseRotX: number
+  readonly phase: number
+  readonly speed: number
+}
+
+export interface BoatInstance {
+  readonly group: THREE.Group
+  readonly mode: 'moored' | 'sailing'
+  readonly basePos: THREE.Vector3
+  readonly orbitRadiusX: number
+  readonly orbitRadiusZ: number
+  readonly orbitCenter: THREE.Vector3
+  readonly phase: number
+  readonly speed: number
+  readonly wakeMesh: Option.Option<THREE.Mesh>
+}
+
+export interface SeagullInstance {
+  readonly group: THREE.Group
+  readonly leftWing: THREE.Object3D
+  readonly rightWing: THREE.Object3D
+  readonly center: THREE.Vector3
+  readonly radius: number
+  readonly phase: number
+  readonly speed: number
+  readonly heightOffset: number
+}
+
+export interface SmokePuff {
+  readonly mesh: THREE.Mesh
+  readonly origin: THREE.Vector3
+  progress: number
+  readonly speed: number
+}
+
+export interface FountainDrop {
+  readonly mesh: THREE.Mesh
+  readonly angle: number
+  progress: number
+}
+
+export interface ChimeRing {
+  readonly mesh: THREE.Mesh
+  readonly mat: THREE.MeshBasicMaterial
+  progress: number
+}
+
+export interface BuiltTownScene {
+  readonly districtClickTargets: ReadonlyArray<THREE.Object3D>
+  readonly windowEmissiveMaterials: ReadonlyArray<THREE.MeshStandardMaterial>
+  readonly lanternBulbMaterials: ReadonlyArray<THREE.MeshStandardMaterial>
+  readonly windmillRotorGroup: Option.Option<THREE.Group>
+  readonly lighthouseBeamGroup: Option.Option<THREE.Group>
+  readonly lighthouseBeamMat: Option.Option<THREE.MeshBasicMaterial>
+  readonly campanileBellGroup: Option.Option<THREE.Group>
+  readonly swayingTrees: ReadonlyArray<SwayingTree>
+  readonly boats: ReadonlyArray<BoatInstance>
+  readonly seagulls: ReadonlyArray<SeagullInstance>
+  readonly smokePuffs: ReadonlyArray<SmokePuff>
+  readonly fountainDrops: ReadonlyArray<FountainDrop>
+  readonly chimeRings: ReadonlyArray<ChimeRing>
+}
+
+## Tagging districts and planting Mediterranean flora
+
+Every building and terrace cap carries its `DistrictId` in `userData.districtId` so a pointer click anywhere on a structure identifies the quarter it belongs to. The `tagDistrict` function stamps that identifier onto an object and its descendants and appends the root object to the raycaster's target list.
+
+Slender Italian cypresses (`buildCypressTree`), gnarled silver-green olive trees (`buildOliveTree`), and cascading magenta bougainvillea vines (`buildBougainvilleaCluster`) soften the stone walls across every terrace.
+
+=>
+
+const tagDistrict = (
+  targets: Array<THREE.Object3D>,
+  obj: THREE.Object3D,
+  districtId: DistrictId,
+): void => {
+  obj.userData.districtId = districtId
+  obj.traverse((child) => {
+    child.userData.districtId = districtId
+  })
+  targets.push(obj)
+}
+
+const buildCypressTree = (
+  townRoot: THREE.Group,
+  swayingTrees: Array<SwayingTree>,
+  x: number,
+  y: number,
+  z: number,
+  scale: number,
+  rng: () => number,
+): void => {
+  const group = new THREE.Group()
+  group.position.set(x, y, z)
+
+  const trunkMat = new THREE.MeshStandardMaterial({
+    color: 0x5c4028,
+    roughness: 0.9,
+  })
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.08 * scale, 0.13 * scale, 0.55 * scale, 6),
+    trunkMat,
+  )
+  trunk.position.y = 0.25 * scale
+  trunk.castShadow = true
+  group.add(trunk)
+
+  const foliageMat = new THREE.MeshStandardMaterial({
+    color: rng() > 0.5 ? 0x264d32 : 0x1e4028,
+    roughness: 0.85,
+    flatShading: true,
+  })
+
+  const lowerCone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.38 * scale, 1.85 * scale, 7),
+    foliageMat,
+  )
+  lowerCone.position.y = 1.25 * scale
+  lowerCone.castShadow = true
+  lowerCone.receiveShadow = true
+  group.add(lowerCone)
+
+  const upperCone = new THREE.Mesh(
+    new THREE.ConeGeometry(0.28 * scale, 1.35 * scale, 7),
+    foliageMat,
+  )
+  upperCone.position.y = 1.85 * scale
+  upperCone.castShadow = true
+  group.add(upperCone)
+
+  townRoot.add(group)
+  swayingTrees.push({
+    mesh: group,
+    baseRotZ: 0,
+    baseRotX: 0,
+    phase: rng() * Math.PI * 2,
+    speed: 1.4 + rng() * 0.8,
+  })
+}
+
+const buildOliveTree = (
+  townRoot: THREE.Group,
+  swayingTrees: Array<SwayingTree>,
+  x: number,
+  y: number,
+  z: number,
+  scale: number,
+  rng: () => number,
+): void => {
+  const group = new THREE.Group()
+  group.position.set(x, y, z)
+
+  const trunkMat = new THREE.MeshStandardMaterial({
+    color: 0x69543e,
+    roughness: 0.9,
+  })
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.09 * scale, 0.15 * scale, 0.65 * scale, 6),
+    trunkMat,
+  )
+  trunk.position.y = 0.3 * scale
+  trunk.rotation.z = (rng() - 0.5) * 0.2
+  trunk.castShadow = true
+  group.add(trunk)
+
+  const oliveLeafMat = new THREE.MeshStandardMaterial({
+    color: rng() > 0.5 ? 0x5f7a52 : 0x6b875e,
+    roughness: 0.82,
+    flatShading: true,
+  })
+
+  Array.forEach(Array.makeBy(3, (i) => i), (i) => {
+    const crown = new THREE.Mesh(
+      new THREE.DodecahedronGeometry((0.42 - i * 0.06) * scale, 0),
+      oliveLeafMat,
+    )
+    crown.position.set(
+      (i - 1) * 0.2 * scale,
+      (0.78 + (i % 2) * 0.16) * scale,
+      ((i % 2) - 0.5) * 0.16 * scale,
+    )
+    crown.scale.y = 0.68
+    crown.castShadow = true
+    crown.receiveShadow = true
+    group.add(crown)
+  })
+
+  townRoot.add(group)
+  swayingTrees.push({
+    mesh: group,
+    baseRotZ: 0,
+    baseRotX: 0,
+    phase: rng() * Math.PI * 2,
+    speed: 1.1 + rng() * 0.6,
+  })
+}
+
+const buildBougainvilleaCluster = (
+  parent: THREE.Object3D,
+  x: number,
+  y: number,
+  z: number,
+  colors: ReadonlyArray<number>,
+  rng: () => number,
+): void => {
+  const color = Option.getOrElse(
+    Option.fromNullishOr(colors[Math.floor(rng() * colors.length)]),
+    () => 0xd92672,
+  )
+  const mat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.65,
+    flatShading: true,
+  })
+  Array.forEach(Array.makeBy(3, (i) => i), (i) => {
+    const bush = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.18 + rng() * 0.12, 0),
+      mat,
+    )
+    bush.position.set(
+      x + (rng() - 0.5) * 0.28,
+      y - i * 0.16,
+      z + (rng() - 0.5) * 0.28,
+    )
+    bush.castShadow = true
+    parent.add(bush)
+  })
+}
+
+## Sculpting the limestone crags and Roman viaduct
+
+The promontory is carved from five faceted cylinder tiers whose lower vertices are radially perturbed so the rock faces catch directional sunlight like fractured coastal limestone. Seven sea stacks ring the outer reef, and a five-pillar Roman stone viaduct bridges the western windmill ridge to the central terrace.
+
+=>
+
+export const buildTownArchitecture = (
+  townRoot: THREE.Group,
+  seed: number,
+  paletteKey: TownPalette,
+  lanternsLit: boolean,
+): BuiltTownScene => {
+  Array.forEach([...townRoot.children], (child) => {
+    townRoot.remove(child)
+  })
+
+  const districtClickTargets: Array<THREE.Object3D> = []
+  const windowEmissiveMaterials: Array<THREE.MeshStandardMaterial> = []
+  const lanternBulbMaterials: Array<THREE.MeshStandardMaterial> = []
+  const swayingTrees: Array<SwayingTree> = []
+  const boats: Array<BoatInstance> = []
+  const seagulls: Array<SeagullInstance> = []
+  const smokePuffs: Array<SmokePuff> = []
+  const fountainDrops: Array<FountainDrop> = []
+  const chimeRings: Array<ChimeRing> = []
+
+  const rng = makeRng(seed)
+  const pal: PaletteColors = paletteColorsOf(paletteKey)
+
+  const cliffMat = new THREE.MeshStandardMaterial({
+    color: pal.cliffColor,
+    roughness: 0.92,
+    flatShading: true,
+  })
+  const cliffDarkMat = new THREE.MeshStandardMaterial({
+    color: pal.cliffSecondary,
+    roughness: 0.95,
+    flatShading: true,
+  })
+  const stoneWallMat = new THREE.MeshStandardMaterial({
+    color: pal.terraceWall,
+    roughness: 0.85,
+    flatShading: true,
+  })
+  const cobbleMat = new THREE.MeshStandardMaterial({
+    color: 0xc9bca8,
+    roughness: 0.88,
+  })
+
+  const makeWindowMaterial = (): THREE.MeshStandardMaterial => {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xffdf9e,
+      emissive: 0xff9d3b,
+      emissiveIntensity: lanternsLit ? 1.55 : 0.08,
+      roughness: 0.3,
+    })
+    windowEmissiveMaterials.push(mat)
+    return mat
+  }
+
+  const makeLanternMaterial = (): THREE.MeshStandardMaterial => {
+    const mat = new THREE.MeshStandardMaterial({
+      color: 0xfff0c2,
+      emissive: 0xffa63b,
+      emissiveIntensity: lanternsLit ? 2.4 : 0.15,
+      roughness: 0.2,
+    })
+    lanternBulbMaterials.push(mat)
+    return mat
+  }
+
+  const cliffGroup = new THREE.Group()
+  townRoot.add(cliffGroup)
+
+  const addCliffTier = (
+    x: number,
+    y: number,
+    z: number,
+    radiusTop: number,
+    radiusBottom: number,
+    height: number,
+    segments: number,
+    districtId: DistrictId,
+  ): void => {
+    const geo = new THREE.CylinderGeometry(
+      radiusTop,
+      radiusBottom,
+      height,
+      segments,
+    )
+    const pos = geo.attributes.position!
+    Array.forEach(Array.makeBy(pos.count, (i) => i), (i) => {
+      const vx = pos.getX(i)
+      const vy = pos.getY(i)
+      const vz = pos.getZ(i)
+      const radial = Math.hypot(vx, vz)
+      if (radial > 0.2 && vy < height * 0.45) {
+        const factor = 0.92 + rng() * 0.16
+        pos.setX(i, vx * factor)
+        pos.setZ(i, vz * factor)
+      }
+    })
+    geo.computeVertexNormals()
+
+    const mesh = new THREE.Mesh(geo, rng() > 0.4 ? cliffMat : cliffDarkMat)
+    mesh.position.set(x, y + height / 2, z)
+    mesh.castShadow = true
+    mesh.receiveShadow = true
+    cliffGroup.add(mesh)
+
+    const capGeo = new THREE.CylinderGeometry(
+      radiusTop * 0.96,
+      radiusTop * 0.98,
+      0.28,
+      segments,
+    )
+    const capMesh = new THREE.Mesh(capGeo, stoneWallMat)
+    capMesh.position.set(x, y + height + 0.1, z)
+    capMesh.receiveShadow = true
+    capMesh.castShadow = true
+    tagDistrict(districtClickTargets, capMesh, districtId)
+    cliffGroup.add(capMesh)
+  }
+
+  addCliffTier(0, -0.8, 0, 14.5, 16.5, 2.8, 12, 'terraces')
+  addCliffTier(1.5, 1.8, -0.8, 11.2, 12.6, 3.6, 11, 'terraces')
+  addCliffTier(1.4, 5.1, 1.5, 7.6, 8.6, 2.5, 10, 'piazza')
+  addCliffTier(-9.2, 1.5, 2.2, 5.2, 6.8, 6.2, 9, 'windmill')
+  addCliffTier(-1.5, 7.3, -2.0, 5.4, 6.5, 4.4, 10, 'duomo')
+
+  Array.forEach(Array.makeBy(7, (i) => i), (i) => {
+    const angle = (i / 7) * Math.PI * 2 + 0.4
+    const dist = 15.5 + rng() * 3.5
+    const rock = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(0.9 + rng() * 1.1, 0),
+      cliffDarkMat,
+    )
+    rock.position.set(Math.cos(angle) * dist, 0.15, Math.sin(angle) * dist)
+    rock.scale.y = 0.65 + rng() * 0.5
+    rock.castShadow = true
+    rock.receiveShadow = true
+    cliffGroup.add(rock)
+  })
+
+  const viaductGroup = new THREE.Group()
+  viaductGroup.position.set(-4.6, 4.5, 0.8)
+  viaductGroup.rotation.y = -0.25
+  const viaductDeck = new THREE.Mesh(
+    new THREE.BoxGeometry(5.6, 0.6, 1.5),
+    stoneWallMat,
+  )
+  viaductDeck.position.y = 2.6
+  viaductDeck.castShadow = true
+  viaductDeck.receiveShadow = true
+  viaductGroup.add(viaductDeck)
+
+  Array.forEach([-2, -1, 0, 1, 2], (offset) => {
+    const pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.55, 2.8, 1.4),
+      stoneWallMat,
+    )
+    pillar.position.set(offset * 1.25, 1.2, 0)
+    pillar.castShadow = true
+    viaductGroup.add(pillar)
+  })
+  tagDistrict(districtClickTargets, viaductGroup, 'terraces')
+  townRoot.add(viaductGroup)
+
+~
+
+## Building the terraced stucco houses
+
+Every house in the Borgo shares one generator (`buildHouse`) that varies its width, height, depth, wall pigment, roof geometry, window grid, wooden shutters, stone balcony, bougainvillea vine, and smoking chimney. When the `Santorini` palette is active, houses frequently wear Cycladic barrel vaults instead of four-sided terracotta hip roofs.
+
+=>
+
+  const buildHouse = (options: {
+    readonly x: number
+    readonly y: number
+    readonly z: number
+    readonly w: number
+    readonly h: number
+    readonly d: number
+    readonly rotY: number
+    readonly districtId: DistrictId
+    readonly hasChimney?: boolean
+    readonly hasBalcony?: boolean
+  }): void => {
+    const houseGroup = new THREE.Group()
+    houseGroup.position.set(options.x, options.y, options.z)
+    houseGroup.rotation.y = options.rotY
+
+    const wallColor = Option.getOrElse(
+      Option.fromNullishOr(pal.walls[Math.floor(rng() * pal.walls.length)]),
+      () => 0xf4e3c9,
+    )
+    const roofColor = Option.getOrElse(
+      Option.fromNullishOr(pal.roofs[Math.floor(rng() * pal.roofs.length)]),
+      () => 0xb85236,
+    )
+    const shutterColor = Option.getOrElse(
+      Option.fromNullishOr(pal.shutters[Math.floor(rng() * pal.shutters.length)]),
+      () => 0x2d6a5c,
+    )
+
+    const wallMat = new THREE.MeshStandardMaterial({
+      color: wallColor,
+      roughness: 0.78,
+    })
+    const roofMat = new THREE.MeshStandardMaterial({
+      color: roofColor,
+      roughness: 0.65,
+      flatShading: true,
+    })
+    const shutterMat = new THREE.MeshStandardMaterial({
+      color: shutterColor,
+      roughness: 0.7,
+    })
+
+    const body = new THREE.Mesh(
+      new THREE.BoxGeometry(options.w, options.h, options.d),
+      wallMat,
+    )
+    body.position.y = options.h / 2
+    body.castShadow = true
+    body.receiveShadow = true
+    houseGroup.add(body)
+
+    if (paletteKey === 'Santorini' && rng() > 0.35) {
+      const vault = new THREE.Mesh(
+        new THREE.CylinderGeometry(
+          options.w * 0.48,
+          options.w * 0.48,
+          options.d * 0.96,
+          12,
+          1,
+          false,
+          0,
+          Math.PI,
+        ),
+        wallMat,
+      )
+      vault.rotation.z = Math.PI / 2
+      vault.rotation.y = Math.PI / 2
+      vault.scale.set(1, 0.55, 1)
+      vault.position.y = options.h
+      vault.castShadow = true
+      houseGroup.add(vault)
+    } else {
+      const roofHeight = 0.45 + rng() * 0.32
+      const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(
+          Math.hypot(options.w, options.d) * 0.56,
+          roofHeight,
+          4,
+        ),
+        roofMat,
+      )
+      roof.position.y = options.h + roofHeight / 2 - 0.02
+      roof.rotation.y = Math.PI / 4
+      roof.scale.set(
+        options.w / Math.max(options.w, options.d),
+        1,
+        options.d / Math.max(options.w, options.d),
+      )
+      roof.castShadow = true
+      roof.receiveShadow = true
+      houseGroup.add(roof)
+    }
+
+    const floors = Math.max(1, Math.floor(options.h / 0.85))
+    const cols = Math.max(1, Math.floor(options.w / 0.72))
+    const winMat = makeWindowMaterial()
+
+    Array.forEach(Array.makeBy(floors, (f) => f), (f) => {
+      Array.forEach(Array.makeBy(cols, (c) => c), (c) => {
+        if (rng() > 0.22) {
+          const wx = (c - (cols - 1) / 2) * 0.56
+          const wy = 0.48 + f * 0.78
+          if (wy < options.h - 0.25) {
+            const winPane = new THREE.Mesh(
+              new THREE.BoxGeometry(0.22, 0.34, 0.05),
+              winMat,
+            )
+            winPane.position.set(wx, wy, options.d / 2 + 0.01)
+            houseGroup.add(winPane)
+
+            const leftShutter = new THREE.Mesh(
+              new THREE.BoxGeometry(0.08, 0.34, 0.06),
+              shutterMat,
+            )
+            leftShutter.position.set(wx - 0.15, wy, options.d / 2 + 0.015)
+            houseGroup.add(leftShutter)
+
+            const rightShutter = new THREE.Mesh(
+              new THREE.BoxGeometry(0.08, 0.34, 0.06),
+              shutterMat,
+            )
+            rightShutter.position.set(wx + 0.15, wy, options.d / 2 + 0.015)
+            houseGroup.add(rightShutter)
+          }
+        }
+      })
+    })
+
+    if (options.hasBalcony || rng() > 0.62) {
+      const balcony = new THREE.Mesh(
+        new THREE.BoxGeometry(options.w * 0.55, 0.12, 0.36),
+        stoneWallMat,
+      )
+      balcony.position.set(0, options.h * 0.58, options.d / 2 + 0.16)
+      houseGroup.add(balcony)
+
+      if (rng() > 0.4) {
+        buildBougainvilleaCluster(
+          houseGroup,
+          options.w * 0.22,
+          options.h * 0.62,
+          options.d / 2 + 0.2,
+          pal.bougainvillea,
+          rng,
+        )
+      }
+    }
+
+    if (options.hasChimney || rng() > 0.72) {
+      const chimX = (rng() - 0.5) * options.w * 0.5
+      const chimZ = (rng() - 0.5) * options.d * 0.5
+      const chimney = new THREE.Mesh(
+        new THREE.BoxGeometry(0.22, 0.55, 0.22),
+        stoneWallMat,
+      )
+      chimney.position.set(chimX, options.h + 0.35, chimZ)
+      houseGroup.add(chimney)
+
+      if (smokePuffs.length < 18) {
+        const smokeMat = new THREE.MeshBasicMaterial({
+          color: 0xf5efe6,
+          transparent: true,
+          opacity: 0.45,
+        })
+        const puffMesh = new THREE.Mesh(
+          new THREE.DodecahedronGeometry(0.18, 0),
+          smokeMat,
+        )
+        const worldOrigin = new THREE.Vector3(
+          options.x + chimX,
+          options.y + options.h + 0.7,
+          options.z + chimZ,
+        )
+        puffMesh.position.copy(worldOrigin)
+        townRoot.add(puffMesh)
+        smokePuffs.push({
+          mesh: puffMesh,
+          origin: worldOrigin,
+          progress: rng(),
+          speed: 0.25 + rng() * 0.2,
+        })
+      }
+    }
+
+    tagDistrict(districtClickTargets, houseGroup, options.districtId)
+    townRoot.add(houseGroup)
+  }
+
+~
+
+## Raising the Duomo di Santa Maria and Campanile
+
+On the highest crag stands the cathedral (`duomoGroup`): a cruciform nave and transept crowned by an octagonal drum, a ribbed majolica cupola, a golden lantern, and a rose window over the west portal. Beside the nave rises the square Campanile bell tower, holding the swinging bronze bell (`bellPivot`) and three concentric golden acoustic rings (`chimeRings`) that expand across the sky whenever the bell is tolled.
+
+=>
+
+  const duomoGroup = new THREE.Group()
+  duomoGroup.position.set(-1.5, 11.8, -2.0)
+
+  const duomoWallMat = new THREE.MeshStandardMaterial({
+    color: paletteKey === 'Santorini' ? 0xffffff : 0xfbf2e3,
+    roughness: 0.7,
+  })
+  const duomoTrimMat = new THREE.MeshStandardMaterial({
+    color: 0xd9c7ad,
+    roughness: 0.8,
+  })
+  const domeMat = new THREE.MeshStandardMaterial({
+    color: pal.domeColor,
+    roughness: 0.28,
+    metalness: 0.15,
+    flatShading: true,
+  })
+  const goldMat = new THREE.MeshStandardMaterial({
+    color: 0xffcf54,
+    emissive: 0xffa619,
+    emissiveIntensity: 0.45,
+    roughness: 0.25,
+    metalness: 0.8,
+  })
+
+  const nave = new THREE.Mesh(new THREE.BoxGeometry(2.6, 2.3, 4.2), duomoWallMat)
+  nave.position.y = 1.15
+  nave.castShadow = true
+  nave.receiveShadow = true
+  duomoGroup.add(nave)
+
+  const transept = new THREE.Mesh(
+    new THREE.BoxGeometry(3.8, 2.1, 1.9),
+    duomoWallMat,
+  )
+  transept.position.set(0, 1.05, -0.4)
+  transept.castShadow = true
+  duomoGroup.add(transept)
+
+  const naveRoof = new THREE.Mesh(
+    new THREE.ConeGeometry(2.4, 0.95, 4),
+    new THREE.MeshStandardMaterial({
+      color: Option.getOrElse(Option.fromNullishOr(pal.roofs[0]), () => 0xb85236),
+      roughness: 0.65,
+    }),
+  )
+  naveRoof.rotation.y = Math.PI / 4
+  naveRoof.scale.set(0.78, 1, 1.32)
+  naveRoof.position.set(0, 2.75, 0.2)
+  naveRoof.castShadow = true
+  duomoGroup.add(naveRoof)
+
+  const drum = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.15, 1.2, 0.9, 8),
+    duomoTrimMat,
+  )
+  drum.position.set(0, 2.55, -0.5)
+  drum.castShadow = true
+  duomoGroup.add(drum)
+
+  const cupola = new THREE.Mesh(
+    new THREE.SphereGeometry(1.14, 12, 10, 0, Math.PI * 2, 0, Math.PI * 0.55),
+    domeMat,
+  )
+  cupola.position.set(0, 2.95, -0.5)
+  cupola.scale.y = 1.22
+  cupola.castShadow = true
+  duomoGroup.add(cupola)
+
+  const cupolaLantern = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.24, 0.28, 0.55, 8),
+    makeLanternMaterial(),
+  )
+  cupolaLantern.position.set(0, 4.42, -0.5)
+  duomoGroup.add(cupolaLantern)
+
+  const crossSpire = new THREE.Mesh(
+    new THREE.ConeGeometry(0.18, 0.55, 6),
+    goldMat,
+  )
+  crossSpire.position.set(0, 4.9, -0.5)
+  duomoGroup.add(crossSpire)
+
+  const roseWindow = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.48, 0.48, 0.08, 16),
+    makeWindowMaterial(),
+  )
+  roseWindow.rotation.x = Math.PI / 2
+  roseWindow.position.set(0, 1.55, 2.11)
+  duomoGroup.add(roseWindow)
+
+  const campanileBase = new THREE.Mesh(
+    new THREE.BoxGeometry(1.15, 4.6, 1.15),
+    duomoWallMat,
+  )
+  campanileBase.position.set(1.85, 2.3, 1.35)
+  campanileBase.castShadow = true
+  campanileBase.receiveShadow = true
+  duomoGroup.add(campanileBase)
+
+  const belfryY = 4.95
+  const belfryCorners: ReadonlyArray<readonly [number, number]> = [
+    [-0.42, -0.42],
+    [0.42, -0.42],
+    [-0.42, 0.42],
+    [0.42, 0.42],
+  ]
+  Array.forEach(belfryCorners, ([px, pz]) => {
+    const pillar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.22, 0.95, 0.22),
+      duomoTrimMat,
+    )
+    pillar.position.set(1.85 + px, belfryY, 1.35 + pz)
+    pillar.castShadow = true
+    duomoGroup.add(pillar)
+  })
+
+  const bellPivot = new THREE.Group()
+  bellPivot.position.set(1.85, belfryY + 0.32, 1.35)
+  const bellMesh = new THREE.Mesh(
+    new THREE.ConeGeometry(0.28, 0.46, 10),
+    goldMat,
+  )
+  bellMesh.position.y = -0.22
+  bellPivot.add(bellMesh)
+  duomoGroup.add(bellPivot)
+
+  const belfrySpire = new THREE.Mesh(
+    new THREE.ConeGeometry(0.86, 1.35, 4),
+    domeMat,
+  )
+  belfrySpire.rotation.y = Math.PI / 4
+  belfrySpire.position.set(1.85, belfryY + 1.12, 1.35)
+  belfrySpire.castShadow = true
+  duomoGroup.add(belfrySpire)
+
+  Array.forEach(Array.makeBy(3, (i) => i), (i) => {
+    const rMat = new THREE.MeshBasicMaterial({
+      color: 0xffd166,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0,
+    })
+    const rMesh = new THREE.Mesh(new THREE.RingGeometry(0.4, 0.56, 32), rMat)
+    rMesh.rotation.x = -Math.PI / 2
+    rMesh.position.set(1.85, belfryY, 1.35)
+    duomoGroup.add(rMesh)
+    chimeRings.push({
+      mesh: rMesh,
+      mat: rMat,
+      progress: i * 0.33,
+    })
+  })
+
+  tagDistrict(districtClickTargets, duomoGroup, 'duomo')
+  townRoot.add(duomoGroup)
+
+  const duomoOffsets: ReadonlyArray<readonly [number, number, number]> = [
+    [-3.9, 11.8, -3.5],
+    [-4.2, 11.8, -0.8],
+    [1.2, 11.8, -4.2],
+    [-1.8, 11.8, -5.2],
+    [1.8, 11.8, -1.8],
+  ]
+  Array.forEach(duomoOffsets, ([hx, hy, hz]) => {
+    buildHouse({
+      x: hx,
+      y: hy,
+      z: hz,
+      w: 1.3 + rng() * 0.5,
+      h: 1.5 + rng() * 0.8,
+      d: 1.3 + rng() * 0.5,
+      rotY: (rng() - 0.5) * 0.5,
+      districtId: 'duomo',
+    })
+  })
+
+~
+
+## Laying out the Piazza del Mercato and hillside Mulino
+
+Below the citadel opens the Piazza del Mercato (`piazzaGroup`), centered on a tiered marble fountain with twelve arcing water droplets, six café parasols, three catenary strands of warm festoon string lanterns, and a semicircle of ten townhouses with balconies overlooking the square.
+
+Across the viaduct on the western ridge stands the cylindrical stone windmill (`windmillGroup`), carrying a four-bladed cedar and canvas rotor (`rotor`) surrounded by four miller's cottages.
+
+=>
+
+  const piazzaGroup = new THREE.Group()
+  piazzaGroup.position.set(1.4, 7.75, 1.6)
+
+  const marbleMat = new THREE.MeshStandardMaterial({
+    color: 0xf5efe6,
+    roughness: 0.45,
+  })
+  const fountainWaterMat = new THREE.MeshStandardMaterial({
+    color: 0x3ec6e0,
+    emissive: 0x16697a,
+    emissiveIntensity: 0.35,
+    roughness: 0.15,
+  })
+
+  const basin1 = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.25, 1.15, 0.38, 10),
+    marbleMat,
+  )
+  basin1.position.y = 0.19
+  basin1.castShadow = true
+  basin1.receiveShadow = true
+  piazzaGroup.add(basin1)
+
+  const pool1 = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.12, 1.12, 0.41, 10),
+    fountainWaterMat,
+  )
+  pool1.position.y = 0.2
+  piazzaGroup.add(pool1)
+
+  const basin2 = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.68, 0.55, 0.28, 10),
+    marbleMat,
+  )
+  basin2.position.y = 0.72
+  basin2.castShadow = true
+  piazzaGroup.add(basin2)
+
+  const finial = new THREE.Mesh(
+    new THREE.ConeGeometry(0.22, 0.65, 8),
+    marbleMat,
+  )
+  finial.position.y = 1.1
+  piazzaGroup.add(finial)
+
+  Array.forEach(Array.makeBy(12, (i) => i), (i) => {
+    const drop = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 6, 6),
+      fountainWaterMat,
+    )
+    piazzaGroup.add(drop)
+    fountainDrops.push({
+      mesh: drop,
+      angle: (i / 12) * Math.PI * 2,
+      progress: i / 12,
+    })
+  })
+
+  const parasolColors: ReadonlyArray<number> = [
+    0xd94f3d, 0xf2b749, 0x2b7a9b, 0xf7f3eb,
+  ]
+  Array.forEach(Array.makeBy(6, (i) => i), (i) => {
+    const angle = (i / 6) * Math.PI * 2 + 0.3
+    const radius = 2.35 + (i % 2) * 0.45
+    const px = Math.cos(angle) * radius
+    const pz = Math.sin(angle) * radius
+
+    const umbrella = new THREE.Mesh(
+      new THREE.ConeGeometry(0.52, 0.28, 8),
+      new THREE.MeshStandardMaterial({
+        color: Option.getOrElse(
+          Option.fromNullishOr(parasolColors[i % parasolColors.length]),
+          () => 0xd94f3d,
+        ),
+        roughness: 0.7,
+      }),
+    )
+    umbrella.position.set(px, 0.72, pz)
+    umbrella.castShadow = true
+    piazzaGroup.add(umbrella)
+
+    const pole = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.03, 0.03, 0.7, 6),
+      stoneWallMat,
+    )
+    pole.position.set(px, 0.35, pz)
+    piazzaGroup.add(pole)
+  })
+
+  const bulbMat = makeLanternMaterial()
+  Array.forEach([0, 1, 2], (strand) => {
+    const zOff = (strand - 1) * 1.65
+    Array.forEach([-4, -3, -2, -1, 0, 1, 2, 3, 4], (b) => {
+      const bx = b * 0.78
+      const sag = 1.85 - (1 - (b / 4) * (b / 4)) * 0.38
+      const bulb = new THREE.Mesh(
+        new THREE.SphereGeometry(0.085, 8, 8),
+        bulbMat,
+      )
+      bulb.position.set(bx, sag, zOff)
+      piazzaGroup.add(bulb)
+    })
+  })
+
+  tagDistrict(districtClickTargets, piazzaGroup, 'piazza')
+  townRoot.add(piazzaGroup)
+
+  Array.forEach(Array.makeBy(10, (i) => i), (i) => {
+    const angle = (i / 10) * Math.PI * 1.65 - 0.65
+    const rad = 4.6 + (i % 2) * 0.85
+    buildHouse({
+      x: 1.4 + Math.cos(angle) * rad,
+      y: 7.7,
+      z: 1.5 + Math.sin(angle) * rad,
+      w: 1.45 + rng() * 0.55,
+      h: 1.8 + rng() * 1.15,
+      d: 1.35 + rng() * 0.45,
+      rotY: -angle + Math.PI / 2,
+      districtId: 'piazza',
+      hasBalcony: true,
+    })
+  })
+
+  const windmillGroup = new THREE.Group()
+  windmillGroup.position.set(-9.5, 7.85, 2.2)
+
+  const millTower = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.05, 1.35, 3.3, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0xf7efe2,
+      roughness: 0.78,
+    }),
+  )
+  millTower.position.y = 1.65
+  millTower.castShadow = true
+  millTower.receiveShadow = true
+  windmillGroup.add(millTower)
+
+  const millRoof = new THREE.Mesh(
+    new THREE.ConeGeometry(1.22, 1.05, 12),
+    new THREE.MeshStandardMaterial({
+      color: Option.getOrElse(Option.fromNullishOr(pal.roofs[0]), () => 0xa65838),
+      roughness: 0.7,
+    }),
+  )
+  millRoof.position.y = 3.82
+  millRoof.castShadow = true
+  windmillGroup.add(millRoof)
+
+  const rotor = new THREE.Group()
+  rotor.position.set(0, 2.85, 1.22)
+
+  const hub = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.18, 0.18, 0.45, 8),
+    new THREE.MeshStandardMaterial({ color: 0x4a321f, roughness: 0.85 }),
+  )
+  hub.rotation.x = Math.PI / 2
+  rotor.add(hub)
+
+  const timberMat = new THREE.MeshStandardMaterial({
+    color: 0x5e3f26,
+    roughness: 0.85,
+  })
+  const sailCanvasMat = new THREE.MeshStandardMaterial({
+    color: 0xfcf6e8,
+    roughness: 0.6,
+    side: THREE.DoubleSide,
+  })
+
+  Array.forEach(Array.makeBy(4, (i) => i), (i) => {
+    const bladeGroup = new THREE.Group()
+    bladeGroup.rotation.z = (i * Math.PI) / 2
+
+    const spar = new THREE.Mesh(
+      new THREE.BoxGeometry(0.1, 2.45, 0.08),
+      timberMat,
+    )
+    spar.position.y = 1.25
+    spar.castShadow = true
+    bladeGroup.add(spar)
+
+    const canvas = new THREE.Mesh(
+      new THREE.BoxGeometry(0.52, 1.9, 0.03),
+      sailCanvasMat,
+    )
+    canvas.position.set(0.28, 1.4, 0.02)
+    canvas.rotation.y = 0.18
+    canvas.castShadow = true
+    bladeGroup.add(canvas)
+
+    rotor.add(bladeGroup)
+  })
+
+  windmillGroup.add(rotor)
+  tagDistrict(districtClickTargets, windmillGroup, 'windmill')
+  townRoot.add(windmillGroup)
+
+  Array.forEach(Array.makeBy(4, (i) => i), (i) => {
+    const angle = i * 1.3 + 0.5
+    buildHouse({
+      x: -9.2 + Math.cos(angle) * 2.8,
+      y: 7.8,
+      z: 2.2 + Math.sin(angle) * 2.6,
+      w: 1.25 + rng() * 0.4,
+      h: 1.35 + rng() * 0.55,
+      d: 1.2 + rng() * 0.4,
+      rotY: angle,
+      districtId: 'windmill',
+    })
+  })
+
+~
+
+## The harbor breakwater, striped Faro, Gozzo fleet, and wheeling gulls
+
+Two rings of hillside dwellings and a fourteen-step cobblestone stairway (`Scalinata Antica`) cascade down to the harbor cove (`harborGroup`). A two-segment stone breakwater mole shelters the timber jetties and ends at the red-and-cream striped Faro lighthouse, whose lantern room projects a dual volumetric light cone (`beamPivot`).
+
+Six wooden Gozzo boats populate the water: three bob at their moorings inside the cove, and three cruise an elliptical path around the island with white wakes trailing behind them. Thirty-four cypress and olive trees dot the middle slopes, eight tall cypresses line the windmill ridge, and ten seagulls circle high above the Duomo.
+
+=>
+
+  Array.forEach(Array.makeBy(24, (i) => i), (i) => {
+    const angle = (i / 24) * Math.PI * 2
+    const radius = 6.6 + (i % 3) * 1.45 + (rng() - 0.5) * 0.8
+    const hx = 1.4 + Math.cos(angle) * radius
+    const hz = -0.6 + Math.sin(angle) * radius
+    if (!(hx > 4.5 && hz > 4.5)) {
+      buildHouse({
+        x: hx,
+        y: 5.45 - (radius > 8.2 ? 0.1 : 0),
+        z: hz,
+        w: 1.25 + rng() * 0.65,
+        h: 1.55 + rng() * 1.25,
+        d: 1.25 + rng() * 0.6,
+        rotY: -angle + Math.PI / 2 + (rng() - 0.5) * 0.35,
+        districtId: 'terraces',
+      })
+    }
+  })
+
+  Array.forEach(Array.makeBy(16, (i) => i), (i) => {
+    const angle = (i / 16) * Math.PI * 2 + 0.2
+    const radius = 11.4 + (rng() - 0.5) * 1.1
+    const hx = 0.5 + Math.cos(angle) * radius
+    const hz = 0.2 + Math.sin(angle) * radius
+    if (!(hx > 3.5 && hz > 3.5)) {
+      buildHouse({
+        x: hx,
+        y: 2.05,
+        z: hz,
+        w: 1.3 + rng() * 0.55,
+        h: 1.6 + rng() * 0.95,
+        d: 1.25 + rng() * 0.5,
+        rotY: -angle + Math.PI / 2,
+        districtId: 'terraces',
+      })
+    }
+  })
+
+  Array.forEach(Array.makeBy(14, (s) => s), (s) => {
+    const t = s / 13
+    const stepMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(1.15, 0.24, 0.65),
+      cobbleMat,
+    )
+    stepMesh.position.set(
+      THREE.MathUtils.lerp(6.8, 2.4, t),
+      THREE.MathUtils.lerp(2.1, 7.6, t),
+      THREE.MathUtils.lerp(6.8, 3.2, t),
+    )
+    stepMesh.rotation.y = 0.65
+    stepMesh.receiveShadow = true
+    townRoot.add(stepMesh)
+  })
+
+  const harborGroup = new THREE.Group()
+  harborGroup.position.set(6.5, 0, 7.0)
+
+  const pier1 = new THREE.Mesh(
+    new THREE.BoxGeometry(7.2, 1.5, 1.8),
+    stoneWallMat,
+  )
+  pier1.position.set(0.8, 0.65, 1.2)
+  pier1.rotation.y = -0.35
+  pier1.castShadow = true
+  pier1.receiveShadow = true
+  harborGroup.add(pier1)
+
+  const pier2 = new THREE.Mesh(
+    new THREE.BoxGeometry(4.8, 1.5, 1.6),
+    stoneWallMat,
+  )
+  pier2.position.set(4.6, 0.65, 3.6)
+  pier2.rotation.y = -1.05
+  pier2.castShadow = true
+  pier2.receiveShadow = true
+  harborGroup.add(pier2)
+
+  const dockMat = new THREE.MeshStandardMaterial({
+    color: 0x735135,
+    roughness: 0.85,
+  })
+  Array.forEach([0, 1], (d) => {
+    const jetty = new THREE.Mesh(
+      new THREE.BoxGeometry(0.75, 0.16, 2.6),
+      dockMat,
+    )
+    jetty.position.set(-0.6 + d * 1.9, 0.65, 2.9 + d * 0.5)
+    jetty.rotation.y = -0.35
+    jetty.castShadow = true
+    harborGroup.add(jetty)
+  })
+
+  const faroX = 5.6
+  const faroZ = 5.4
+  const faroBase = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.82, 0.96, 1.4, 10),
+    stoneWallMat,
+  )
+  faroBase.position.set(faroX, 1.35, faroZ)
+  faroBase.castShadow = true
+  harborGroup.add(faroBase)
+
+  const stripeWhite = new THREE.MeshStandardMaterial({
+    color: 0xfaf6ed,
+    roughness: 0.65,
+  })
+  const stripeRed = new THREE.MeshStandardMaterial({
+    color: 0xc93b2b,
+    roughness: 0.65,
+  })
+
+  Array.forEach([0, 1, 2, 3], (s) => {
+    const seg = new THREE.Mesh(
+      new THREE.CylinderGeometry(
+        0.56 - s * 0.04,
+        0.6 - s * 0.04,
+        0.72,
+        10,
+      ),
+      s % 2 === 0 ? stripeWhite : stripeRed,
+    )
+    seg.position.set(faroX, 2.35 + s * 0.72, faroZ)
+    seg.castShadow = true
+    harborGroup.add(seg)
+  })
+
+  const faroLantern = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.42, 0.42, 0.65, 10),
+    makeLanternMaterial(),
+  )
+  faroLantern.position.set(faroX, 5.2, faroZ)
+  harborGroup.add(faroLantern)
+
+  const faroCap = new THREE.Mesh(
+    new THREE.ConeGeometry(0.55, 0.55, 10),
+    stripeRed,
+  )
+  faroCap.position.set(faroX, 5.75, faroZ)
+  harborGroup.add(faroCap)
+
+  const beamPivot = new THREE.Group()
+  beamPivot.position.set(faroX, 5.2, faroZ)
+
+  const beamGeo = new THREE.ConeGeometry(2.6, 14, 16, 1, true)
+  beamGeo.translate(0, -7, 0)
+  beamGeo.rotateX(-Math.PI / 2)
+  const beamMat = new THREE.MeshBasicMaterial({
+    color: 0xffe49e,
+    transparent: true,
+    opacity: lanternsLit ? 0.16 : 0.0,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+  })
+  const beamCone = new THREE.Mesh(beamGeo, beamMat)
+  beamPivot.add(beamCone)
+
+  const beamConeBack = new THREE.Mesh(beamGeo, beamMat)
+  beamConeBack.rotation.y = Math.PI
+  beamPivot.add(beamConeBack)
+
+  harborGroup.add(beamPivot)
+  tagDistrict(districtClickTargets, harborGroup, 'harbor')
+  townRoot.add(harborGroup)
+
+  Array.forEach(Array.makeBy(7, (i) => i), (i) => {
+    const t = i / 6
+    buildHouse({
+      x: THREE.MathUtils.lerp(3.5, 9.2, t),
+      y: 1.35,
+      z: THREE.MathUtils.lerp(8.5, 5.8, t),
+      w: 1.2 + rng() * 0.4,
+      h: 1.55 + rng() * 0.75,
+      d: 1.2 + rng() * 0.35,
+      rotY: -0.42,
+      districtId: 'harbor',
+    })
+  })
+
+  const hullColors: ReadonlyArray<number> = [
+    0x1e5c8a, 0xc93b2b, 0x287a5c, 0xd98a26, 0x2d4c73, 0xa8383b,
+  ]
+
+  const createBoatMesh = (hullColor: number, withSail: boolean): THREE.Group => {
+    const boat = new THREE.Group()
+
+    const hull = new THREE.Mesh(
+      new THREE.BoxGeometry(0.72, 0.28, 1.55),
+      new THREE.MeshStandardMaterial({ color: hullColor, roughness: 0.6 }),
+    )
+    hull.position.y = 0.12
+    hull.castShadow = true
+    boat.add(hull)
+
+    const deckTrim = new THREE.Mesh(
+      new THREE.BoxGeometry(0.78, 0.08, 1.62),
+      new THREE.MeshStandardMaterial({ color: 0xf7f2e6, roughness: 0.7 }),
+    )
+    deckTrim.position.y = 0.26
+    boat.add(deckTrim)
+
+    const cabin = new THREE.Mesh(
+      new THREE.BoxGeometry(0.44, 0.28, 0.52),
+      new THREE.MeshStandardMaterial({ color: 0xede4d3, roughness: 0.7 }),
+    )
+    cabin.position.set(0, 0.4, -0.15)
+    boat.add(cabin)
+
+    const bowLantern = new THREE.Mesh(
+      new THREE.SphereGeometry(0.08, 6, 6),
+      makeLanternMaterial(),
+    )
+    bowLantern.position.set(0, 0.42, 0.68)
+    boat.add(bowLantern)
+
+    if (withSail) {
+      const mast = new THREE.Mesh(
+        new THREE.CylinderGeometry(0.03, 0.04, 1.45, 6),
+        dockMat,
+      )
+      mast.position.set(0, 0.9, 0.15)
+      boat.add(mast)
+
+      const sail = new THREE.Mesh(
+        new THREE.ConeGeometry(0.55, 1.25, 3),
+        new THREE.MeshStandardMaterial({
+          color: 0xfff8eb,
+          roughness: 0.65,
+          side: THREE.DoubleSide,
+        }),
+      )
+      sail.position.set(0.08, 0.98, 0.15)
+      sail.scale.set(0.25, 1, 1.1)
+      sail.castShadow = true
+      boat.add(sail)
+    }
+
+    return boat
+  }
+
+  const mooredCoords: ReadonlyArray<readonly [number, number, number]> = [
+    [5.5, 10.6, 0.3],
+    [7.4, 11.2, -0.2],
+    [9.3, 11.8, 0.5],
+  ]
+  Array.forEach(mooredCoords, ([bx, bz, rot], idx) => {
+    const hullColor = Option.getOrElse(
+      Option.fromNullishOr(hullColors[idx]),
+      () => 0x1e5c8a,
+    )
+    const boatGroup = createBoatMesh(hullColor, idx === 1)
+    boatGroup.position.set(bx, 0.05, bz)
+    boatGroup.rotation.y = rot
+    tagDistrict(districtClickTargets, boatGroup, 'harbor')
+    townRoot.add(boatGroup)
+    boats.push({
+      group: boatGroup,
+      mode: 'moored',
+      basePos: new THREE.Vector3(bx, 0.05, bz),
+      orbitRadiusX: 0,
+      orbitRadiusZ: 0,
+      orbitCenter: new THREE.Vector3(),
+      phase: idx * 1.7,
+      speed: 1.2,
+      wakeMesh: Option.none(),
+    })
+  })
+
+  Array.forEach([0, 1, 2], (s) => {
+    const hullColor = Option.getOrElse(
+      Option.fromNullishOr(hullColors[s + 3]),
+      () => 0xd98a26,
+    )
+    const boatGroup = createBoatMesh(hullColor, true)
+    const wakeMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.38,
+      side: THREE.DoubleSide,
+    })
+    const wakeGeo = new THREE.PlaneGeometry(0.65, 2.1)
+    wakeGeo.rotateX(-Math.PI / 2)
+    const wakeMesh = new THREE.Mesh(wakeGeo, wakeMat)
+    wakeMesh.position.set(0, 0.03, -1.25)
+    boatGroup.add(wakeMesh)
+
+    tagDistrict(districtClickTargets, boatGroup, 'harbor')
+    townRoot.add(boatGroup)
+
+    boats.push({
+      group: boatGroup,
+      mode: 'sailing',
+      basePos: new THREE.Vector3(),
+      orbitRadiusX: 20.5 + s * 3.4,
+      orbitRadiusZ: 18.5 + s * 3.0,
+      orbitCenter: new THREE.Vector3(0.5, 0.06, 1.0),
+      phase: (s * Math.PI * 2) / 3,
+      speed: 0.14 + s * 0.035,
+      wakeMesh: Option.some(wakeMesh),
+    })
+  })
+
+  Array.forEach(Array.makeBy(34, (i) => i), () => {
+    const angle = rng() * Math.PI * 2
+    const dist = 5.0 + rng() * 9.5
+    const tx = Math.cos(angle) * dist
+    const tz = Math.sin(angle) * dist
+    if (!(tx > 4 && tz > 4)) {
+      const ty = dist < 7.5 ? 7.6 : dist < 11.2 ? 5.4 : 2.1
+      const scale = 0.72 + rng() * 0.52
+      if (rng() > 0.38) {
+        buildCypressTree(townRoot, swayingTrees, tx, ty, tz, scale, rng)
+      } else {
+        buildOliveTree(townRoot, swayingTrees, tx, ty, tz, scale, rng)
+      }
+    }
+  })
+
+  Array.forEach(Array.makeBy(8, (i) => i), (i) => {
+    buildCypressTree(
+      townRoot,
+      swayingTrees,
+      -7.2 - i * 0.7,
+      7.75,
+      0.4 + (i % 2) * 3.2,
+      0.85 + rng() * 0.35,
+      rng,
+    )
+  })
+
+  const gullMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.5,
+  })
+  const wingTipMat = new THREE.MeshStandardMaterial({
+    color: 0x2b3440,
+    roughness: 0.6,
+  })
+
+  Array.forEach(Array.makeBy(10, (g) => g), (g) => {
+    const gullGroup = new THREE.Group()
+    const body = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.36, 5), gullMat)
+    body.rotation.x = Math.PI / 2
+    gullGroup.add(body)
+
+    const leftWing = new THREE.Group()
+    const lwMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.025, 0.14),
+      g % 2 === 0 ? gullMat : wingTipMat,
+    )
+    lwMesh.position.x = -0.21
+    leftWing.add(lwMesh)
+    gullGroup.add(leftWing)
+
+    const rightWing = new THREE.Group()
+    const rwMesh = new THREE.Mesh(
+      new THREE.BoxGeometry(0.42, 0.025, 0.14),
+      g % 2 === 0 ? gullMat : wingTipMat,
+    )
+    rwMesh.position.x = 0.21
+    rightWing.add(rwMesh)
+    gullGroup.add(rightWing)
+
+    townRoot.add(gullGroup)
+    seagulls.push({
+      group: gullGroup,
+      leftWing,
+      rightWing,
+      center: new THREE.Vector3(
+        (rng() - 0.5) * 8,
+        14.5 + rng() * 5.5,
+        (rng() - 0.5) * 8,
+      ),
+      radius: 5.5 + rng() * 7.5,
+      phase: (g / 10) * Math.PI * 2,
+      speed: 0.55 + rng() * 0.35,
+      heightOffset: rng() * Math.PI * 2,
+    })
+  })
+
+  return {
+    districtClickTargets,
+    windowEmissiveMaterials,
+    lanternBulbMaterials,
+    windmillRotorGroup: Option.some(rotor),
+    lighthouseBeamGroup: Option.some(beamPivot),
+    lighthouseBeamMat: Option.some(beamMat),
+    campanileBellGroup: Option.some(bellPivot),
+    swayingTrees,
+    boats,
+    seagulls,
+    smokePuffs,
+    fountainDrops,
+    chimeRings,
+  }
+}
+
+## What the architecture module draws on
+
+The module draws `Array` and `Option` from `effect`, geometry and material primitives from `three`, the `DistrictId` and `TownPalette` types from `../shared/domain`, and the `PaletteColors`, `makeRng`, and `paletteColorsOf` helpers from `./palettes`.
+
+=>
+
+import { Array, Option } from 'effect'
+import * as THREE from 'three'
+
+import type { DistrictId, TownPalette } from '../shared/domain'
+import { type PaletteColors, makeRng, paletteColorsOf } from './palettes'
+
+## The module {Tangle}
+
+=>
+
+::[What the architecture module draws on]
+
+::[Animated actors of the promontory]
+
+::[Tagging districts and planting Mediterranean flora]
+
+::[Sculpting the limestone crags and Roman viaduct]
+
+::[Building the terraced stucco houses]
+
+::[Raising the Duomo di Santa Maria and Campanile]
+
+::[Laying out the Piazza del Mercato and hillside Mulino]
+
+::[The harbor breakwater, striped Faro, Gozzo fleet, and wheeling gulls]

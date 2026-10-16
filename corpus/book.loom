@@ -1,0 +1,36 @@
+# Borgo Solare
+
+Borgo Solare is an interactive isometric Mediterranean hill town written as a Loom book. Every module in the application is authored here in prose and code, then tangled to TypeScript — the Effect domain schemas, the backend service, the procedural Three.js architecture, the Foldkit server-rendered interface, and its test suite.
+
+Read the book from the front. It opens with the domain vocabulary of the coastal promontory, builds the Effect backend that serves and mutates town snapshots, sculpts the three-dimensional limestone village and its living motion, and closes with the Foldkit application that renders on the server and hydrates in the browser.
+
+# Table of Contents {TOC}
+
+### Part I — The Domain of the Borgo
+
+A coastal hill town has a fixed geography and a changing atmosphere. This part defines the schemas that model both: the four regional pigment palettes, the four solar phases, the four camera vantages, the five districts of the promontory, the preference cookie that remembers a visitor's town, and the deterministic builder that turns a numeric seed into a complete town snapshot.
+
+1. Atmosphere and geography
+
+### Part II — The Effect Backend
+
+The server is an Effect program from the request edge inward. This part defines the `TownService` component that resolves initial flags from query parameters and cookies, generates new town snapshots, and rings the bronze Campanile bells, followed by the Bun HTTP server that hosts the application in production.
+
+1. The town service
+2. The Bun HTTP server
+
+### Part III — The Isometric World in Three.js
+
+The artwork is a miniature Mediterranean promontory rendered through an orthographic isometric lens. This part translates the domain schemas into pigment tables and solar lighting rigs, sculpts the terraced cliffs, Roman viaduct, Duomo, piazza fountain, windmill, lighthouse, and Gozzo fleet from procedural geometry, and drives their continuous motion in a WebGL viewport.
+
+1. Palettes, light, and bronze harmonics
+2. Architecture of the promontory
+3. The living viewport
+
+### Part IV — The Foldkit SSR Application
+
+The user interface follows The Elm Architecture in Foldkit. This part defines the model, messages, commands, and subscriptions that steer the Three.js scene, composes the glassmorphic HUD overlay, wires server rendering and client hydration, and verifies every state transition with deterministic story tests.
+
+1. Model, messages, and the overlay view
+2. Server rendering and client hydration
+3. Stories and verification

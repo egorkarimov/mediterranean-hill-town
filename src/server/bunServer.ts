@@ -1,76 +1,96 @@
-import { Effect, Option } from 'effect'
+import { Data, Effect, Option } from 'effect'
 import { Server } from 'foldkit/experimental'
 import { resolve, sep } from 'node:path'
 
-import {
-  TownServiceLive,
-  handleApiRequestEffect,
-} from './townService'
-
-// ============================================================================
-// Bun + Effect Production Server (Serves Static Assets, Effect API, & Foldkit SSR)
-// ============================================================================
+import { TownService, handleApiRequestEffect } from './townService'
 
 const PORT = Number.parseInt(process.env.PORT ?? '3000', 10)
 const CLIENT_DIR = resolve(process.cwd(), 'dist/client')
 const FETCH_HANDLER_PATH = resolve(process.cwd(), 'dist/server/fetch.js')
 
-const startServerEffect = Effect.gen(function* () {
-  const ssrModule = yield* Effect.tryPromise({
-    try: () =>
-      import(FETCH_HANDLER_PATH) as Promise<{
-        default: { fetch: (req: Request) => Promise<Response> }
-      }>,
-    catch: cause =>
-      new Error(
-        `Could not load built Foldkit SSR handler at ${FETCH_HANDLER_PATH}. Run 'bun run build' first.`,
-        { cause },
-      ),
+type SsrFetchHandler = {
+  readonly fetch: (request: Request) => Promise<Response>
+}
+
+export class SsrLoadError extends Data.TaggedError('SsrLoadError')<{
+  readonly path: string
+  readonly cause: unknown
+}> {
+  override get message(): string {
+    return `Could not load built Foldkit SSR handler at ${this.path}. Run 'bun run build' first.`
+  }
+}
+
+const loadSsrHandler = Effect.tryPromise({
+  try: () =>
+    import(FETCH_HANDLER_PATH) as Promise<{
+      readonly default: SsrFetchHandler
+    }>,
+  catch: (cause) => new SsrLoadError({ path: FETCH_HANDLER_PATH, cause }),
+}).pipe(Effect.map((module) => module.default))
+
+const staticAssetResponseOf = (
+  request: Request,
+  pathname: string,
+): Effect.Effect<Option.Option<Response>> =>
+  Effect.gen(function* () {
+    const isReadMethod = request.method === 'GET' || request.method === 'HEAD'
+    if (!isReadMethod || Server.resolvesToIndexHtml(pathname)) {
+      return Option.none()
+    }
+
+    const candidatePath = resolve(CLIENT_DIR, `.${pathname}`)
+    const insideClientDir =
+      candidatePath.startsWith(`${CLIENT_DIR}${sep}`) &&
+      candidatePath !== CLIENT_DIR
+
+    if (!insideClientDir) {
+      return Option.none()
+    }
+
+    const file = Bun.file(candidatePath)
+    const exists = yield* Effect.promise(() => file.exists())
+    if (!exists) {
+      return Option.none()
+    }
+
+    const cacheControl = pathname.startsWith('/assets/')
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=3600'
+
+    return Option.some(
+      new Response(request.method === 'HEAD' ? null : file, {
+        status: 200,
+        headers: {
+          'content-type': file.type || 'application/octet-stream',
+          'cache-control': cacheControl,
+        },
+      }),
+    )
   })
 
-  const ssrHandler = ssrModule.default
+const startServerEffect = Effect.gen(function* () {
+  const ssrHandler = yield* loadSsrHandler
 
   const server = Bun.serve({
     port: PORT,
-    fetch: async (request: Request): Promise<Response> => {
-      // 1. Route /api/* requests through our Effect TownService layer
-      const maybeApiResponse = await Effect.runPromise(
-        handleApiRequestEffect(request).pipe(Effect.provide(TownServiceLive)),
-      )
-      if (Option.isSome(maybeApiResponse)) {
-        return maybeApiResponse.value
-      }
-
-      const url = new URL(request.url)
-
-      // 2. Serve built static client assets for GET / HEAD requests
-      if (
-        (request.method === 'GET' || request.method === 'HEAD') &&
-        !Server.resolvesToIndexHtml(url.pathname)
-      ) {
-        const candidatePath = resolve(CLIENT_DIR, `.${url.pathname}`)
-        if (
-          candidatePath.startsWith(`${CLIENT_DIR}${sep}`) &&
-          candidatePath !== CLIENT_DIR
-        ) {
-          const file = Bun.file(candidatePath)
-          if (await file.exists()) {
-            return new Response(request.method === 'HEAD' ? null : file, {
-              status: 200,
-              headers: {
-                'content-type': file.type || 'application/octet-stream',
-                'cache-control': url.pathname.startsWith('/assets/')
-                  ? 'public, max-age=31536000, immutable'
-                  : 'public, max-age=3600',
-              },
-            })
+    fetch: (request: Request): Promise<Response> =>
+      Effect.runPromise(
+        Effect.gen(function* () {
+          const maybeApiResponse = yield* handleApiRequestEffect(request)
+          if (Option.isSome(maybeApiResponse)) {
+            return maybeApiResponse.value
           }
-        }
-      }
 
-      // 3. Delegate page requests to Foldkit SSR Fetch Handler
-      return ssrHandler.fetch(request)
-    },
+          const url = new URL(request.url)
+          const maybeStatic = yield* staticAssetResponseOf(request, url.pathname)
+          if (Option.isSome(maybeStatic)) {
+            return maybeStatic.value
+          }
+
+          return yield* Effect.promise(() => ssrHandler.fetch(request))
+        }).pipe(Effect.provide(TownService.layer)),
+      ),
   })
 
   yield* Effect.logInfo(

@@ -1,5 +1,21 @@
-import { Duration, Effect, Option, Queue, Schema, Stream } from 'effect'
-import { Command, Mount, type Runtime, Subscription, type Update } from 'foldkit'
+import {
+  Array,
+  Data,
+  Duration,
+  Effect,
+  Match,
+  Option,
+  Queue,
+  Schema,
+  Stream,
+} from 'effect'
+import {
+  Command,
+  Mount,
+  type Runtime,
+  Subscription,
+  type Update,
+} from 'foldkit'
 import type { Document, Html, HtmlBuilder } from 'foldkit/html'
 import { defineMessageUnion } from 'foldkit/message'
 import { modifyFields } from 'foldkit/struct'
@@ -25,10 +41,6 @@ import {
   getActiveTownController,
   mountIsometricTown,
 } from './three/isometricTown'
-
-// ============================================================================
-// 1. MODEL & FLAGS (Schema-Backed Single Source of Truth)
-// ============================================================================
 
 export const Flags = TownSnapshot
 export type Flags = typeof Flags.Type
@@ -61,22 +73,19 @@ export const Model = Schema.Struct({
 })
 export type Model = typeof Model.Type
 
-export const toSceneState = (model: Model): TownSceneState => ({
-  seed: model.seed,
-  timeOfDay: model.timeOfDay,
-  palette: model.palette,
-  cameraPreset: model.cameraPreset,
-  sunAngle: model.sunAngle,
-  windBreeze: model.windBreeze,
-  autoOrbit: model.autoOrbit,
-  lanternsLit: model.lanternsLit,
-  bellsRinging: model.bellsRinging,
-  selectedDistrict: model.selectedDistrict,
-})
-
-// ============================================================================
-// 2. MESSAGES (Verb-First Past-Tense Facts)
-// ============================================================================
+export const toSceneState = (model: Model): TownSceneState =>
+  TownSceneState.make({
+    seed: model.seed,
+    timeOfDay: model.timeOfDay,
+    palette: model.palette,
+    cameraPreset: model.cameraPreset,
+    sunAngle: model.sunAngle,
+    windBreeze: model.windBreeze,
+    autoOrbit: model.autoOrbit,
+    lanternsLit: model.lanternsLit,
+    bellsRinging: model.bellsRinging,
+    selectedDistrict: model.selectedDistrict,
+  })
 
 export const Message = defineMessageUnion({
   SelectedTimeOfDay: { timeOfDay: TimeOfDay },
@@ -103,19 +112,14 @@ export const Message = defineMessageUnion({
 })
 export type Message = typeof Message.Type
 
-// ============================================================================
-// 3. COMMANDS (Explicit Effect Side Effects)
-// ============================================================================
-
 export const SyncTownScene = Command.define('SyncTownScene', {
   args: { sceneState: TownSceneState },
   messages: [Message.CompletedSyncScene],
   execute: ({ sceneState }) =>
     Effect.sync(() => {
-      const controller = getActiveTownController()
-      if (controller !== null) {
+      Option.map(getActiveTownController(), (controller) => {
         controller.applyState(sceneState)
-      }
+      })
       return Message.CompletedSyncScene()
     }),
 })
@@ -137,6 +141,10 @@ export const PersistTownPreferences = Command.define('PersistTownPreferences', {
     }),
 })
 
+class TownApiError extends Data.TaggedError('TownApiError')<{
+  readonly reason: string
+}> {}
+
 const decodeSnapshotEffect = Schema.decodeUnknownEffect(TownSnapshot)
 const decodeBellChimeEffect = Schema.decodeUnknownEffect(BellChimeResponse)
 
@@ -157,21 +165,27 @@ export const RequestNewTownFromBackend = Command.define(
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ palette, timeOfDay }),
             }),
-          catch: err =>
-            err instanceof Error ? err.message : 'Network request failed',
+          catch: () =>
+            new TownApiError({ reason: 'Network request failed' }),
         })
 
         if (!response.ok) {
-          return yield* Effect.fail('Static host fallback')
+          return yield* new TownApiError({ reason: 'Static host fallback' })
         }
 
         const json = yield* Effect.tryPromise({
           try: () => response.json(),
-          catch: () => 'Invalid JSON from Effect backend',
+          catch: () =>
+            new TownApiError({ reason: 'Invalid JSON from Effect backend' }),
         })
 
         const snapshot = yield* decodeSnapshotEffect(json).pipe(
-          Effect.mapError(() => 'Schema validation failed for TownSnapshot'),
+          Effect.mapError(
+            () =>
+              new TownApiError({
+                reason: 'Schema validation failed for TownSnapshot',
+              }),
+          ),
         )
 
         return Message.SucceededGenerateTown({ snapshot })
@@ -197,10 +211,9 @@ export const TriggerCampanileBells = Command.define('TriggerCampanileBells', {
   messages: [Message.SucceededRingBells],
   execute: ({ seed }) =>
     Effect.gen(function* () {
-      const controller = getActiveTownController()
-      if (controller !== null) {
+      Option.map(getActiveTownController(), (controller) => {
         controller.triggerBellChime()
-      }
+      })
 
       const response = yield* Effect.tryPromise({
         try: () =>
@@ -209,12 +222,17 @@ export const TriggerCampanileBells = Command.define('TriggerCampanileBells', {
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ seed }),
           }),
-        catch: () => new Error('Bell endpoint unreachable'),
+        catch: () =>
+          new TownApiError({ reason: 'Bell endpoint unreachable' }),
       })
+
+      if (!response.ok) {
+        return yield* new TownApiError({ reason: 'Bell endpoint status error' })
+      }
 
       const raw = yield* Effect.tryPromise({
         try: () => response.json(),
-        catch: () => new Error('Invalid bell JSON'),
+        catch: () => new TownApiError({ reason: 'Invalid bell JSON' }),
       })
 
       const chime = yield* decodeBellChimeEffect(raw)
@@ -223,12 +241,12 @@ export const TriggerCampanileBells = Command.define('TriggerCampanileBells', {
       Effect.catch(() =>
         Effect.succeed(
           Message.SucceededRingBells({
-            chime: {
+            chime: BellChimeResponse.make({
               chimeNote: 'D♯4 · Campana Maggiore',
               seagullsStartled: 8,
               echoDurationMs: 3600,
               timestamp: new Date().toISOString(),
-            },
+            }),
           }),
         ),
       ),
@@ -242,10 +260,6 @@ export const ExpireBellResonance = Command.define('ExpireBellResonance', {
   ),
 })
 
-// ============================================================================
-// 4. MOUNT (Three.js Imperative Canvas Boundary with Stream Events)
-// ============================================================================
-
 export const MountTownViewport = Mount.defineStream('MountTownViewport', {
   args: { initialScene: TownSceneState },
   messages: [
@@ -256,22 +270,22 @@ export const MountTownViewport = Mount.defineStream('MountTownViewport', {
     Stream.callback<
       | typeof Message.MountedTownCanvas.Type
       | typeof Message.SelectedDistrictFromCanvas.Type
-    >(queue =>
+    >((queue) =>
       Effect.gen(function* () {
         const controller = yield* Effect.acquireRelease(
           Effect.sync(() =>
-            mountIsometricTown(element, initialScene, districtId => {
+            mountIsometricTown(element, initialScene, (districtId) => {
               Queue.offerUnsafe(
                 queue,
                 Message.SelectedDistrictFromCanvas({ districtId }),
               )
             }),
           ),
-          instance => Effect.sync(() => instance.dispose()),
+          (instance) => Effect.sync(() => instance.dispose()),
         )
 
         yield* viewStateChanges.pipe(
-          Stream.runForEach(viewState =>
+          Stream.runForEach((viewState) =>
             Effect.sync(() => controller.setPaused(viewState !== 'Live')),
           ),
           Effect.forkScoped,
@@ -283,15 +297,11 @@ export const MountTownViewport = Mount.defineStream('MountTownViewport', {
     ),
 })
 
-// ============================================================================
-// 5. SUBSCRIPTIONS (Ongoing Time-of-Day Cycle Stream)
-// ============================================================================
-
-export const subscriptions = Subscription.make<Model, Message>()(entry => ({
+export const subscriptions = Subscription.make<Model, Message>()((entry) => ({
   autoCycle: entry(
     { autoTimeCycle: Schema.Boolean },
     {
-      modelToDependencies: model => ({
+      modelToDependencies: (model) => ({
         autoTimeCycle: model.autoTimeCycle,
       }),
       dependenciesToStream: ({ autoTimeCycle }) =>
@@ -306,12 +316,8 @@ export const subscriptions = Subscription.make<Model, Message>()(entry => ({
   ),
 }))
 
-// ============================================================================
-// 6. INIT (Server & Client Hydratable Initialization from Flags)
-// ============================================================================
-
-export const init: Runtime.ApplicationInit<Model, Message, Flags> = flags => ({
-  model: {
+export const init: Runtime.ApplicationInit<Model, Message, Flags> = (flags) => ({
+  model: Model.make({
     townName: flags.townName,
     region: flags.region,
     seed: flags.seed,
@@ -336,19 +342,25 @@ export const init: Runtime.ApplicationInit<Model, Message, Flags> = flags => ({
     renderedAt: flags.renderedAt,
     renderedOn: flags.renderedOn,
     canvasMounted: false,
-  },
+  }),
 })
 
-// ============================================================================
-// 7. UPDATE (Pure Exhaustive State Machine Transitions)
-// ============================================================================
-
-const deriveTimeOfDayFromAngle = (angle: number): TimeOfDay => {
-  if (angle < -6) return 'Starlight'
-  if (angle < 20) return 'GoldenHour'
-  if (angle < 38) return 'Dawn'
-  return 'Midday'
-}
+const deriveTimeOfDayFromAngle = (angle: number): TimeOfDay =>
+  Match.value(angle).pipe(
+    Match.when(
+      (a) => a < -6,
+      () => 'Starlight' as const,
+    ),
+    Match.when(
+      (a) => a < 20,
+      () => 'GoldenHour' as const,
+    ),
+    Match.when(
+      (a) => a < 38,
+      () => 'Dawn' as const,
+    ),
+    Match.orElse(() => 'Midday' as const),
+  )
 
 export const update = (
   model: Model,
@@ -429,7 +441,7 @@ export const update = (
 
     ToggledAutoOrbit: () => {
       const nextModel = modifyFields(model, {
-        autoOrbit: current => !current,
+        autoOrbit: (current) => !current,
       })
       return {
         model: nextModel,
@@ -439,13 +451,13 @@ export const update = (
 
     ToggledAutoTimeCycle: () => ({
       model: modifyFields(model, {
-        autoTimeCycle: current => !current,
+        autoTimeCycle: (current) => !current,
       }),
     }),
 
     ToggledLanterns: () => {
       const nextModel = modifyFields(model, {
-        lanternsLit: current => !current,
+        lanternsLit: (current) => !current,
       })
       return {
         model: nextModel,
@@ -455,7 +467,7 @@ export const update = (
 
     ToggledHudCollapsed: () => ({
       model: modifyFields(model, {
-        hudCollapsed: current => !current,
+        hudCollapsed: (current) => !current,
       }),
     }),
 
@@ -470,11 +482,9 @@ export const update = (
     },
 
     SelectedDistrictFromCanvas: ({ districtId }) => {
-      const nextSelected =
-        model.selectedDistrict._tag === 'Some' &&
-        model.selectedDistrict.value === districtId
-          ? Option.none<DistrictId>()
-          : Option.some(districtId)
+      const nextSelected = Option.contains(model.selectedDistrict, districtId)
+        ? Option.none<DistrictId>()
+        : Option.some(districtId)
 
       const nextModel = modifyFields(model, {
         selectedDistrict: () => nextSelected,
@@ -518,7 +528,8 @@ export const update = (
     },
 
     FailedGenerateTown: () => {
-      const fallbackSeed = ((model.seed * 1664525 + 1013904223) >>> 0) % 8900 + 100
+      const fallbackSeed =
+        (((model.seed * 1664525 + 1013904223) >>> 0) % 8900) + 100
       const nextModel = modifyFields(model, {
         seed: () => fallbackSeed,
         isGeneratingTown: () => false,
@@ -576,7 +587,9 @@ export const update = (
 
     TickedAutoCycle: () => {
       const nextSun =
-        model.sunAngle >= 80 ? -32 : Math.round((model.sunAngle + 1.5) * 10) / 10
+        model.sunAngle >= 80
+          ? -32
+          : Math.round((model.sunAngle + 1.5) * 10) / 10
       const nextTime = deriveTimeOfDayFromAngle(nextSun)
       const nextModel = modifyFields(model, {
         sunAngle: () => nextSun,
@@ -589,10 +602,6 @@ export const update = (
       }
     },
   })
-
-// ============================================================================
-// 8. VIEW (Declarative SSR-Hydratable Mediterranean Architectural UI)
-// ============================================================================
 
 const TIME_OPTIONS: ReadonlyArray<
   Readonly<{ id: TimeOfDay; short: string; badge: string }>
@@ -701,7 +710,6 @@ const renderTopHeader = (model: Model, h: HtmlBuilder<Message>): Html =>
         ],
       ),
 
-      // Right action bar
       h.div(
         [h.Class('flex flex-wrap items-center gap-2')],
         [
@@ -759,7 +767,6 @@ const renderLeftControlsPanel = (
       ),
     ],
     [
-      // Atmosphere & Time of Day
       h.div(
         [h.Class('flex flex-col gap-2')],
         [
@@ -782,7 +789,7 @@ const renderLeftControlsPanel = (
           ),
           h.div(
             [h.Class('grid grid-cols-2 gap-1.5')],
-            TIME_OPTIONS.map(opt => {
+            Array.map(TIME_OPTIONS, (opt) => {
               const active = model.timeOfDay === opt.id
               return h.button(
                 [
@@ -807,7 +814,6 @@ const renderLeftControlsPanel = (
         ],
       ),
 
-      // Sun Elevation & Breeze Sliders
       h.div(
         [
           h.Class(
@@ -834,7 +840,7 @@ const renderLeftControlsPanel = (
                 h.Max('80'),
                 h.Step('1'),
                 h.Value(String(model.sunAngle)),
-                h.OnInput(val =>
+                h.OnInput((val) =>
                   Message.ChangedSunAngle({
                     sunAngle: Number.parseFloat(val) || 0,
                   }),
@@ -862,7 +868,7 @@ const renderLeftControlsPanel = (
                 h.Max('2.4'),
                 h.Step('0.1'),
                 h.Value(String(model.windBreeze)),
-                h.OnInput(val =>
+                h.OnInput((val) =>
                   Message.ChangedWindBreeze({
                     windBreeze: Number.parseFloat(val) || 1.0,
                   }),
@@ -874,7 +880,6 @@ const renderLeftControlsPanel = (
         ],
       ),
 
-      // Regional Architectural Palette
       h.div(
         [h.Class('flex flex-col gap-2')],
         [
@@ -888,7 +893,7 @@ const renderLeftControlsPanel = (
           ),
           h.div(
             [h.Class('grid grid-cols-2 gap-1.5')],
-            PALETTE_OPTIONS.map(p => {
+            Array.map(PALETTE_OPTIONS, (p) => {
               const active = model.palette === p.id
               return h.button(
                 [
@@ -904,7 +909,7 @@ const renderLeftControlsPanel = (
                   h.span([h.Class('truncate')], [p.label]),
                   h.div(
                     [h.Class('flex items-center gap-1')],
-                    p.swatches.map(sw =>
+                    Array.map(p.swatches, (sw) =>
                       h.span([
                         h.Class(
                           `h-2.5 w-4 rounded-sm border border-white/20 ${sw}`,
@@ -919,7 +924,6 @@ const renderLeftControlsPanel = (
         ],
       ),
 
-      // Isometric Camera Presets
       h.div(
         [h.Class('flex flex-col gap-2')],
         [
@@ -933,10 +937,10 @@ const renderLeftControlsPanel = (
           ),
           h.div(
             [h.Class('grid grid-cols-2 gap-1.5')],
-            CAMERA_OPTIONS.map(preset => {
+            Array.map(CAMERA_OPTIONS, (preset) => {
               const active =
                 model.cameraPreset === preset &&
-                model.selectedDistrict._tag === 'None'
+                Option.isNone(model.selectedDistrict)
               return h.button(
                 [
                   h.Type('button'),
@@ -956,7 +960,6 @@ const renderLeftControlsPanel = (
         ],
       ),
 
-      // Simulation Toggles
       h.div(
         [h.Class('flex flex-wrap gap-1.5 pt-1')],
         [
@@ -994,7 +997,11 @@ const renderLeftControlsPanel = (
                   : 'cursor-pointer flex-1 rounded-xl border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-amber-100/60',
               ),
             ],
-            [model.autoTimeCycle ? '☀ Solar Cycle: Live' : '☀ Solar Cycle: Pause'],
+            [
+              model.autoTimeCycle
+                ? '☀ Solar Cycle: Live'
+                : '☀ Solar Cycle: Pause',
+            ],
           ),
         ],
       ),
@@ -1012,7 +1019,6 @@ const renderRightDistrictsPanel = (
       ),
     ],
     [
-      // Telemetry Mini-Grid
       h.div(
         [h.Class('grid grid-cols-3 gap-2')],
         [
@@ -1070,10 +1076,9 @@ const renderRightDistrictsPanel = (
         ],
       ),
 
-      // Bell Chime Toast if recently rung
       Option.match(model.lastBellChime, {
         onNone: () => h.empty,
-        onSome: chime =>
+        onSome: (chime) =>
           h.div(
             [
               h.Class(
@@ -1087,13 +1092,14 @@ const renderRightDistrictsPanel = (
               ),
               h.div(
                 [h.Class('text-[11px] text-amber-100/75')],
-                [`${chime.seagullsStartled} seagulls took flight across the cupola`],
+                [
+                  `${chime.seagullsStartled} seagulls took flight across the cupola`,
+                ],
               ),
             ],
           ),
       }),
 
-      // Interactive Architectural Districts List
       h.div(
         [h.Class('flex items-center justify-between')],
         [
@@ -1126,10 +1132,11 @@ const renderRightDistrictsPanel = (
 
       h.div(
         [h.Class('flex max-h-80 flex-col gap-2 overflow-y-auto pr-1')],
-        model.districts.map(district => {
-          const isSelected =
-            model.selectedDistrict._tag === 'Some' &&
-            model.selectedDistrict.value === district.id
+        Array.map(model.districts, (district) => {
+          const isSelected = Option.contains(
+            model.selectedDistrict,
+            district.id,
+          )
           return h.button(
             [
               h.Type('button'),
@@ -1166,7 +1173,9 @@ const renderRightDistrictsPanel = (
               ),
               h.div(
                 [h.Class('text-[11px] font-medium text-amber-200/75')],
-                [`${district.italianSubtitle} · ${district.buildingCount} structures`],
+                [
+                  `${district.italianSubtitle} · ${district.buildingCount} structures`,
+                ],
               ),
               isSelected
                 ? h.p(
@@ -1191,7 +1200,6 @@ const renderRightDistrictsPanel = (
         }),
       ),
 
-      // Footer Status Bar
       h.div(
         [
           h.Class(
@@ -1219,7 +1227,6 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
       ),
     ],
     [
-      // Full-screen Three.js Isometric Canvas Host (Mounted via Foldkit Mount.defineStream)
       h.div([
         h.Id('town-canvas-container'),
         h.Class('absolute inset-0 h-full w-full'),
@@ -1230,7 +1237,6 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
         ),
       ]),
 
-      // HUD Overlay Layer
       h.div(
         [
           h.Class(
@@ -1254,7 +1260,6 @@ export const view = (model: Model, h: HtmlBuilder<Message>): Document => ({
                 ],
               ),
 
-          // Bottom interactive hint pill
           h.footer(
             [
               h.Class(

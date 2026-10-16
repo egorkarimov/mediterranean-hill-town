@@ -1,0 +1,198 @@
+---
+Part IV, Chapter 3: Stories and verification
+Package: src/main.test.ts
+Language: TypeScript
+---
+
+# Stories and verification
+
+Because the Foldkit `update` function is pure and returns commands as values rather than executing side effects in place, the entire state machine can be verified synchronously without launching a browser or a WebGL context. Foldkit's `foldkit/story` DSL narrates an interaction step by step: start `given(initialModel)`, send a `message(...)`, inspect the resulting `model(...)`, assert the exact `Command` values emitted with `Command.expectExact(...)`, and resolve those commands with synthetic replies via `Command.resolve(...)`.
+
+Alongside the Foldkit stories, the test suite also exercises the Effect backend's `handleApiRequest` boundary directly with standard `Request` objects.
+
+## Verifying the state machine with Foldkit stories
+
+The suite begins by constructing a deterministic `initialFlags` snapshot for seed `42` (`Amalfi`, `GoldenHour`, `Server`) and passing it through `init(initialFlags)` to obtain `initialModel`.
+
+From that starting state, three stories verify the core user journeys:
+1. Selecting the `Santorini` palette updates `model.palette` and dispatches both `SyncTownScene` and `PersistTownPreferences`; selecting `Starlight` updates `timeOfDay`, lights the lanterns (`lanternsLit: true`), sets `sunAngle` to `-28`, and dispatches the same pair of synchronization and persistence commands.
+2. Clicking `ClickedRingCampanileBells` sets `bellsRinging: true`, focuses the `'duomo'` district (`Option.contains(m.selectedDistrict, 'duomo')`), and dispatches `SyncTownScene`, `TriggerCampanileBells`, and `ExpireBellResonance`. Resolving the bell chime and resonance commands clears `bellsRinging` back to `false` and records the `BellChimeResponse` in `lastBellChime`.
+3. Clicking `ClickedRegenerateTown` flips `isGeneratingTown` to `true` and dispatches `RequestNewTownFromBackend`. When that command resolves with a new `TownSnapshot` (seed `777`, `CinqueTerre`, `Dawn`), the model adopts the new town name, seed, and telemetry and dispatches `SyncTownScene`.
+
+=>
+
+const initialFlags = createTownSnapshot({
+  seed: 42,
+  palette: 'Amalfi',
+  timeOfDay: 'GoldenHour',
+  renderedOn: 'Server',
+})
+
+const { model: initialModel } = init(initialFlags)
+
+test('switching palette and time of day updates Model and dispatches SyncTownScene + PersistTownPreferences', () => {
+  story(
+    update,
+    given(initialModel),
+    message(Message.SelectedPalette({ palette: 'Santorini' })),
+    model((m) => {
+      expect(m.palette).toBe('Santorini')
+    }),
+    Command.expectExact(SyncTownScene, PersistTownPreferences),
+    Command.resolve(SyncTownScene, Message.CompletedSyncScene()),
+    Command.resolve(
+      PersistTownPreferences,
+      Message.CompletedPersistCookie(),
+    ),
+    message(Message.SelectedTimeOfDay({ timeOfDay: 'Starlight' })),
+    model((m) => {
+      expect(m.timeOfDay).toBe('Starlight')
+      expect(m.lanternsLit).toBe(true)
+      expect(m.sunAngle).toBe(-28)
+    }),
+    Command.expectExact(SyncTownScene, PersistTownPreferences),
+    Command.resolve(SyncTownScene, Message.CompletedSyncScene()),
+    Command.resolve(
+      PersistTownPreferences,
+      Message.CompletedPersistCookie(),
+    ),
+  )
+})
+
+test('ringing Campanile bells selects Duomo district and triggers acoustic chime', () => {
+  const mockChime = BellChimeResponse.make({
+    chimeNote: 'D♯4 · Campana Maggiore (Bronze 1684)',
+    seagullsStartled: 9,
+    echoDurationMs: 3600,
+    timestamp: '2026-10-16T12:00:00.000Z',
+  })
+
+  story(
+    update,
+    given(initialModel),
+    message(Message.ClickedRingCampanileBells()),
+    model((m) => {
+      expect(m.bellsRinging).toBe(true)
+      expect(Option.contains(m.selectedDistrict, 'duomo')).toBe(true)
+    }),
+    Command.expectExact(
+      SyncTownScene,
+      TriggerCampanileBells,
+      ExpireBellResonance,
+    ),
+    Command.resolve(SyncTownScene, Message.CompletedSyncScene()),
+    Command.resolve(
+      TriggerCampanileBells,
+      Message.SucceededRingBells({ chime: mockChime }),
+    ),
+    Command.resolve(ExpireBellResonance, Message.CompletedBellResonance()),
+    Command.expectExact(SyncTownScene),
+    Command.resolve(SyncTownScene, Message.CompletedSyncScene()),
+    model((m) => {
+      expect(m.bellsRinging).toBe(false)
+      expect(Option.isSome(m.lastBellChime)).toBe(true)
+    }),
+  )
+})
+
+test('generating a new Borgo seed dispatches RequestNewTownFromBackend and updates town telemetry', () => {
+  const generatedSnapshot = createTownSnapshot({
+    seed: 777,
+    palette: 'CinqueTerre',
+    timeOfDay: 'Dawn',
+    renderedOn: 'Server',
+  })
+
+  story(
+    update,
+    given(initialModel),
+    message(Message.ClickedRegenerateTown()),
+    model((m) => {
+      expect(m.isGeneratingTown).toBe(true)
+    }),
+    Command.expectExact(RequestNewTownFromBackend),
+    Command.resolve(
+      RequestNewTownFromBackend,
+      Message.SucceededGenerateTown({ snapshot: generatedSnapshot }),
+    ),
+    Command.expectExact(SyncTownScene),
+    Command.resolve(SyncTownScene, Message.CompletedSyncScene()),
+    model((m) => {
+      expect(m.isGeneratingTown).toBe(false)
+      expect(m.seed).toBe(777)
+      expect(m.townName).toBe(generatedSnapshot.townName)
+    }),
+  )
+})
+
+## Verifying the Effect HTTP API
+
+Finally, the suite verifies that `handleApiRequest` decodes query parameters on `GET /api/town` and JSON request bodies on `POST /api/town/generate` through `TownService`, returning `Option.some(Response)` with the expected `TownSnapshot` payload.
+
+=>
+
+test('Effect backend API handles GET /api/town and POST /api/town/generate', async () => {
+  const getRes = await handleApiRequest(
+    new Request('http://localhost:3000/api/town?palette=Santorini&seed=108'),
+  )
+  expect(Option.isSome(getRes)).toBe(true)
+  const getResponse = Option.getOrThrow(getRes)
+  const getData = (await getResponse.json()) as {
+    seed: number
+    palette: string
+  }
+  expect(getData.seed).toBe(108)
+  expect(getData.palette).toBe('Santorini')
+
+  const postRes = await handleApiRequest(
+    new Request('http://localhost:3000/api/town/generate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        seed: 512,
+        palette: 'Provence',
+        timeOfDay: 'Midday',
+      }),
+    }),
+  )
+  expect(Option.isSome(postRes)).toBe(true)
+  const postResponse = Option.getOrThrow(postRes)
+  const postData = (await postResponse.json()) as {
+    seed: number
+    palette: string
+    timeOfDay: string
+  }
+  expect(postData.seed).toBe(512)
+  expect(postData.palette).toBe('Provence')
+  expect(postData.timeOfDay).toBe('Midday')
+})
+
+## The module {Tangle}
+
+=>
+
+import { Option } from 'effect'
+import { Command, given, message, model, story } from 'foldkit/story'
+import { describe, expect, test } from 'vitest'
+
+import {
+  ExpireBellResonance,
+  Message,
+  PersistTownPreferences,
+  RequestNewTownFromBackend,
+  SyncTownScene,
+  TriggerCampanileBells,
+  init,
+  update,
+} from './main'
+import {
+  createTownSnapshot,
+  handleApiRequest,
+} from './server/townService'
+import { BellChimeResponse } from './shared/domain'
+
+describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
+  ::[Verifying the state machine with Foldkit stories]
+
+  ::[Verifying the Effect HTTP API]
+})

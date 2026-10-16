@@ -1,0 +1,233 @@
+import { Array, Match, Option } from 'effect'
+import * as THREE from 'three'
+
+import type {
+  CameraPreset,
+  DistrictId,
+  TimeOfDay,
+  TownPalette,
+} from '../shared/domain'
+
+export interface PaletteColors {
+  readonly walls: ReadonlyArray<number>
+  readonly roofs: ReadonlyArray<number>
+  readonly shutters: ReadonlyArray<number>
+  readonly domeColor: number
+  readonly cliffColor: number
+  readonly cliffSecondary: number
+  readonly terraceWall: number
+  readonly bougainvillea: ReadonlyArray<number>
+}
+
+export const paletteColorsOf = (palette: TownPalette): PaletteColors =>
+  Match.value(palette).pipe(
+    Match.when('Amalfi', () => ({
+      walls: [0xf4e3c9, 0xe8b882, 0xd9825b, 0xf2d19b, 0xdfa06e, 0xf7ede0],
+      roofs: [0xb85236, 0xc75f3e, 0xa1442b, 0xd16b47],
+      shutters: [0x2d6a5c, 0x3b7a6b, 0x24546b, 0x6b442a],
+      domeColor: 0x2c8c74,
+      cliffColor: 0x8f8273,
+      cliffSecondary: 0x736759,
+      terraceWall: 0xa89985,
+      bougainvillea: [0xd92672, 0xe83e8c, 0xb81d5d],
+    })),
+    Match.when('CinqueTerre', () => ({
+      walls: [0xe66c55, 0xf0b659, 0xd94f43, 0xe88d56, 0xf5d487, 0xc95a49],
+      roofs: [0x6e737b, 0x5d6269, 0xa8523b, 0x7d828a],
+      shutters: [0x1f5c4b, 0x286e5b, 0x1a473a, 0x325d73],
+      domeColor: 0xd99b26,
+      cliffColor: 0x6e6a66,
+      cliffSecondary: 0x57534f,
+      terraceWall: 0x8c857d,
+      bougainvillea: [0xe0246d, 0xf24e8b, 0x9e1952],
+    })),
+    Match.when('Santorini', () => ({
+      walls: [0xfafcff, 0xf2f6fa, 0xe8eef5, 0xffffff, 0xf5f2eb, 0xdce6f2],
+      roofs: [0x1a5fb4, 0x2574d1, 0xf2f5f8, 0x174f96],
+      shutters: [0x1d63b8, 0x2b7de0, 0x4589d6, 0x154c8f],
+      domeColor: 0x1558b0,
+      cliffColor: 0x6b564e,
+      cliffSecondary: 0x52403a,
+      terraceWall: 0x8a756b,
+      bougainvillea: [0xd91e6b, 0xf03282, 0xb01556],
+    })),
+    Match.when('Provence', () => ({
+      walls: [0xe5c598, 0xd6a76c, 0xc98b53, 0xebd3ad, 0xdba979, 0xc47947],
+      roofs: [0xa65838, 0xb86642, 0x914a2d, 0xc2764f],
+      shutters: [0x5e789e, 0x6c87ad, 0x4c6485, 0x786b99],
+      domeColor: 0x9c5233,
+      cliffColor: 0x968571,
+      cliffSecondary: 0x7d6d5b,
+      terraceWall: 0xb3a18b,
+      bougainvillea: [0x9146b8, 0xb559d6, 0xd63874],
+    })),
+    Match.exhaustive,
+  )
+
+export interface AtmosphereColors {
+  readonly skyTop: number
+  readonly skyBottom: number
+  readonly fogColor: number
+  readonly sunColor: number
+  readonly sunIntensity: number
+  readonly ambientSky: number
+  readonly ambientGround: number
+  readonly ambientIntensity: number
+  readonly waterDeep: number
+  readonly waterShallow: number
+  readonly waterSpecular: number
+  readonly starOpacity: number
+}
+
+export const atmosphereColorsOf = (timeOfDay: TimeOfDay): AtmosphereColors =>
+  Match.value(timeOfDay).pipe(
+    Match.when('Dawn', () => ({
+      skyTop: 0x3b4d7a,
+      skyBottom: 0xf2a68d,
+      fogColor: 0xe8ad99,
+      sunColor: 0xffa07a,
+      sunIntensity: 2.1,
+      ambientSky: 0xd9a7c7,
+      ambientGround: 0x695958,
+      ambientIntensity: 1.15,
+      waterDeep: 0x184e6e,
+      waterShallow: 0x358296,
+      waterSpecular: 0xffbfa3,
+      starOpacity: 0.2,
+    })),
+    Match.when('Midday', () => ({
+      skyTop: 0x3a88d4,
+      skyBottom: 0xa8d8f8,
+      fogColor: 0xbbe1fa,
+      sunColor: 0xfff8e7,
+      sunIntensity: 2.65,
+      ambientSky: 0x99d1ff,
+      ambientGround: 0x8c7a6b,
+      ambientIntensity: 1.35,
+      waterDeep: 0x0b588c,
+      waterShallow: 0x1ca8b8,
+      waterSpecular: 0xffffff,
+      starOpacity: 0.0,
+    })),
+    Match.when('GoldenHour', () => ({
+      skyTop: 0x2b3663,
+      skyBottom: 0xf08c55,
+      fogColor: 0xe38f62,
+      sunColor: 0xff8c42,
+      sunIntensity: 2.45,
+      ambientSky: 0xff9a66,
+      ambientGround: 0x523b35,
+      ambientIntensity: 1.1,
+      waterDeep: 0x123e5c,
+      waterShallow: 0x28788a,
+      waterSpecular: 0xffaa5e,
+      starOpacity: 0.25,
+    })),
+    Match.when('Starlight', () => ({
+      skyTop: 0x091124,
+      skyBottom: 0x192b4d,
+      fogColor: 0x13223d,
+      sunColor: 0x6d93c7,
+      sunIntensity: 0.75,
+      ambientSky: 0x263e6b,
+      ambientGround: 0x1c1924,
+      ambientIntensity: 0.75,
+      waterDeep: 0x071d33,
+      waterShallow: 0x0f3b57,
+      waterSpecular: 0x8cb8ff,
+      starOpacity: 0.95,
+    })),
+    Match.exhaustive,
+  )
+
+export interface CameraPose {
+  readonly target: THREE.Vector3
+  readonly azimuth: number
+  readonly polar: number
+  readonly zoom: number
+}
+
+export const cameraPoseOf = (preset: CameraPreset): CameraPose =>
+  Match.value(preset).pipe(
+    Match.when('Panorama', () => ({
+      target: new THREE.Vector3(0, 5.5, 0),
+      azimuth: Math.PI * 0.25,
+      polar: Math.PI * 0.31,
+      zoom: 1.0,
+    })),
+    Match.when('HarborCove', () => ({
+      target: new THREE.Vector3(7.5, 1.8, 8.5),
+      azimuth: Math.PI * 0.16,
+      polar: Math.PI * 0.34,
+      zoom: 1.68,
+    })),
+    Match.when('DuomoPiazza', () => ({
+      target: new THREE.Vector3(-1.2, 11.2, -1.5),
+      azimuth: Math.PI * 0.32,
+      polar: Math.PI * 0.29,
+      zoom: 1.82,
+    })),
+    Match.when('WindmillRidge', () => ({
+      target: new THREE.Vector3(-9.5, 7.6, 2.0),
+      azimuth: Math.PI * 0.42,
+      polar: Math.PI * 0.32,
+      zoom: 1.72,
+    })),
+    Match.exhaustive,
+  )
+
+export const districtCenterOf = (districtId: DistrictId): THREE.Vector3 =>
+  Match.value(districtId).pipe(
+    Match.when('duomo', () => new THREE.Vector3(-1.5, 13.4, -2.0)),
+    Match.when('piazza', () => new THREE.Vector3(1.8, 7.4, 2.2)),
+    Match.when('terraces', () => new THREE.Vector3(4.5, 5.6, -2.5)),
+    Match.when('windmill', () => new THREE.Vector3(-9.8, 8.8, 2.2)),
+    Match.when('harbor', () => new THREE.Vector3(8.5, 2.2, 9.0)),
+    Match.exhaustive,
+  )
+
+export const makeRng = (seed: number): (() => number) => {
+  const cell = { state: (Math.abs(Math.floor(seed)) || 42) ^ 0x6d2b79f5 }
+  return () => {
+    const step1 = Math.imul(cell.state ^ (cell.state >>> 15), cell.state | 1)
+    const step2 = step1 ^ (step1 + Math.imul(step1 ^ (step1 >>> 7), step1 | 61))
+    cell.state = step2
+    return ((step2 ^ (step2 >>> 14)) >>> 0) / 4294967296
+  }
+}
+
+const createAudioContextSafe = Option.liftThrowable((): Option.Option<AudioContext> => {
+  if (typeof window === 'undefined') {
+    return Option.none()
+  }
+  const AudioCtx =
+    window.AudioContext ??
+    (window as unknown as { readonly webkitAudioContext?: typeof AudioContext })
+      .webkitAudioContext
+  return Option.map(Option.fromNullishOr(AudioCtx), (Ctor) => new Ctor())
+})
+
+export const playBellHarmonics = (): void => {
+  const maybeCtx = Option.flatten(createAudioContextSafe())
+  if (Option.isNone(maybeCtx)) {
+    return
+  }
+
+  const ctx = maybeCtx.value
+  const now = ctx.currentTime
+  const partials: ReadonlyArray<number> = [587.33, 880, 1174.66]
+
+  Array.forEach(partials, (freq, idx) => {
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.type = idx === 0 ? 'sine' : 'triangle'
+    osc.frequency.setValueAtTime(freq, now + idx * 0.14)
+    gain.gain.setValueAtTime(0.001, now + idx * 0.14)
+    gain.gain.exponentialRampToValueAtTime(0.11 / (idx + 1), now + idx * 0.14 + 0.03)
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + idx * 0.14 + 2.4)
+    osc.connect(gain)
+    gain.connect(ctx.destination)
+    osc.start(now + idx * 0.14)
+    osc.stop(now + idx * 0.14 + 2.5)
+  })
+}

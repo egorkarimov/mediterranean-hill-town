@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "tangled": [
+    "entry.server.ts",
+    "entry.ts",
+    "src/entry.server.ts",
+    "src/entry.ts",
+    "src/main.test.ts",
+    "src/main.ts",
+    "src/server/bunServer.ts",
+    "src/server/townService.ts",
+    "src/shared/domain.ts",
+    "src/three/architecture.ts",
+    "src/three/isometricTown.ts",
+    "src/three/palettes.ts"
+  ]
+}

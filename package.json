@@ -5,6 +5,8 @@
   "type": "module",
   "description": "Mediterranean Isometric Hill Town in Three.js with Bun, Effect BE, and Foldkit SSR FE",
   "scripts": {
+    "tangle": "loom tangle corpus",
+    "toc": "loom toc corpus/book.loom",
     "dev": "vite",
     "build": "vite build",
     "start": "bun run src/server/bunServer.ts",

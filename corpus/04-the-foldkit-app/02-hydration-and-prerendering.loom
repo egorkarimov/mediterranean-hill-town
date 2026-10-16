@@ -1,0 +1,117 @@
+---
+Part IV, Chapter 2: Server rendering and client hydration
+Package: src/
+Language: TypeScript
+---
+
+# Server rendering and client hydration
+
+An SSR application runs across two worlds: first on the server, where a `Request` becomes an HTML document with embedded `Flags`; then in the browser, where Foldkit attaches event listeners and stream mounts to the existing DOM without discarding the server-rendered markup.
+
+Because the server entry and the client entry are the two halves of one handshake, this chapter keeps them side by side and tangles them into `src/entry.server.ts` and `src/entry.ts`.
+
+## Rendering the document on the server
+
+Foldkit's `@foldkit/vite-plugin` calls `src/entry.server.ts` in three situations: during `vite dev` for every incoming page or API request, during `vite build` to pre-render every route listed in `prerenderPaths` into static HTML, and inside `src/server/bunServer.ts` when the standalone Bun server renders a dynamic page.
+
+`renderDocument` wraps the rendered application markup and asset tags in a full HTML shell with `lang="en"` and a dark slate `theme-color` meta tag.
+
+`renderPage` runs an Effect program provided with `TownServiceLive`. If the request is an `OPTIONS` preflight, it returns a `204 No Content` response via `Server.Responded`. Otherwise, it checks `handleApiRequestEffect(request)` first so `/api/town/*` calls work seamlessly inside `vite dev` as well as in production. For page requests, it asks `TownService` to resolve the initial `TownSnapshot` from URL query parameters and the `borgo_solare_prefs` cookie, renders `{ Flags, init, view }` to string via `Server.renderToString`, and attaches `cache-control: private, no-store` whenever a cookie personalized the response.
+
+=>
+
+import { Effect, Option } from 'effect'
+import { Server } from 'foldkit/experimental'
+
+import { Flags, init, view } from './main'
+import {
+  TownService,
+  TownServiceLive,
+  handleApiRequestEffect,
+} from './server/townService'
+
+export const prerenderPaths = ['/']
+
+export const renderDocument: Server.DocumentRenderer = (application, assets) =>
+  Server.renderDocument(application, assets, {
+    lang: 'en',
+    head: '<meta name="theme-color" content="#0f172a">',
+  })
+
+const renderPageEffect = (request: Request) =>
+  Effect.gen(function* () {
+    if (request.method === 'OPTIONS') {
+      return Server.Responded(
+        new Response(null, {
+          status: 204,
+          headers: {
+            allow: 'GET, HEAD, POST, OPTIONS',
+          },
+        }),
+      )
+    }
+
+    const maybeApiResponse = yield* handleApiRequestEffect(request)
+    if (Option.isSome(maybeApiResponse)) {
+      return Server.Responded(maybeApiResponse.value)
+    }
+
+    const townService = yield* TownService
+    const flags = yield* townService.resolveSnapshotForRequest(request)
+
+    const renderedApplication = yield* Server.renderToString(
+      { Flags, init, view },
+      { flags },
+    )
+
+    return Option.match(Option.fromNullishOr(request.headers.get('cookie')), {
+      onNone: () => Server.Rendered(renderedApplication),
+      onSome: () =>
+        Server.Rendered(renderedApplication, {
+          headers: {
+            'cache-control': 'private, no-store',
+            vary: 'cookie',
+          },
+        }),
+    })
+  })
+
+export const renderPage = (request: Request): Promise<Server.EntryResult> =>
+  Effect.runPromise(
+    renderPageEffect(request).pipe(Effect.provide(TownServiceLive)),
+  )
+
+## Hydrating on the client
+
+Once the HTML document reaches the browser, `src/entry.ts` constructs the Foldkit runtime application from `Model`, `Flags`, `init`, `update`, `view`, and `subscriptions`, targeting `#root`. Calling `Runtime.hydrate(application)` decodes the server-serialized `Flags`, reconciles the virtual DOM against `#root`, and activates `MountTownViewport` — bringing the Three.js promontory to life inside the already-rendered HUD frame.
+
+=>
+
+import { Runtime } from 'foldkit'
+
+import { Flags, Model, init, subscriptions, update, view } from './main'
+import './styles.css'
+
+const application = Runtime.makeApplication({
+  Model,
+  Flags,
+  init,
+  update,
+  view,
+  subscriptions,
+  container: document.getElementById('root'),
+})
+
+Runtime.hydrate(application)
+
+## The server entry {Tangle}[entry.server.ts]
+
+=>
+
+::[Rendering the document on the server]
+
+## The client entry {Tangle}[entry.ts]
+
+=>
+
+::[Hydrating on the client]

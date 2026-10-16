@@ -1,3 +1,4 @@
+import { Option } from 'effect'
 import { Command, given, message, model, story } from 'foldkit/story'
 import { describe, expect, test } from 'vitest'
 
@@ -15,6 +16,7 @@ import {
   createTownSnapshot,
   handleApiRequest,
 } from './server/townService'
+import { BellChimeResponse } from './shared/domain'
 
 describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
   const initialFlags = createTownSnapshot({
@@ -31,7 +33,7 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
       update,
       given(initialModel),
       message(Message.SelectedPalette({ palette: 'Santorini' })),
-      model(m => {
+      model((m) => {
         expect(m.palette).toBe('Santorini')
       }),
       Command.expectExact(SyncTownScene, PersistTownPreferences),
@@ -41,7 +43,7 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
         Message.CompletedPersistCookie(),
       ),
       message(Message.SelectedTimeOfDay({ timeOfDay: 'Starlight' })),
-      model(m => {
+      model((m) => {
         expect(m.timeOfDay).toBe('Starlight')
         expect(m.lanternsLit).toBe(true)
         expect(m.sunAngle).toBe(-28)
@@ -56,20 +58,20 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
   })
 
   test('ringing Campanile bells selects Duomo district and triggers acoustic chime', () => {
-    const mockChime = {
+    const mockChime = BellChimeResponse.make({
       chimeNote: 'D♯4 · Campana Maggiore (Bronze 1684)',
       seagullsStartled: 9,
       echoDurationMs: 3600,
       timestamp: '2026-10-16T12:00:00.000Z',
-    }
+    })
 
     story(
       update,
       given(initialModel),
       message(Message.ClickedRingCampanileBells()),
-      model(m => {
+      model((m) => {
         expect(m.bellsRinging).toBe(true)
-        expect(m.selectedDistrict._tag).toBe('Some')
+        expect(Option.contains(m.selectedDistrict, 'duomo')).toBe(true)
       }),
       Command.expectExact(
         SyncTownScene,
@@ -84,9 +86,9 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
       Command.resolve(ExpireBellResonance, Message.CompletedBellResonance()),
       Command.expectExact(SyncTownScene),
       Command.resolve(SyncTownScene, Message.CompletedSyncScene()),
-      model(m => {
+      model((m) => {
         expect(m.bellsRinging).toBe(false)
-        expect(m.lastBellChime._tag).toBe('Some')
+        expect(Option.isSome(m.lastBellChime)).toBe(true)
       }),
     )
   })
@@ -103,7 +105,7 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
       update,
       given(initialModel),
       message(Message.ClickedRegenerateTown()),
-      model(m => {
+      model((m) => {
         expect(m.isGeneratingTown).toBe(true)
       }),
       Command.expectExact(RequestNewTownFromBackend),
@@ -113,7 +115,7 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
       ),
       Command.expectExact(SyncTownScene),
       Command.resolve(SyncTownScene, Message.CompletedSyncScene()),
-      model(m => {
+      model((m) => {
         expect(m.isGeneratingTown).toBe(false)
         expect(m.seed).toBe(777)
         expect(m.townName).toBe(generatedSnapshot.townName)
@@ -125,15 +127,14 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
     const getRes = await handleApiRequest(
       new Request('http://localhost:3000/api/town?palette=Santorini&seed=108'),
     )
-    expect(getRes._tag).toBe('Some')
-    if (getRes._tag === 'Some') {
-      const data = (await getRes.value.json()) as {
-        seed: number
-        palette: string
-      }
-      expect(data.seed).toBe(108)
-      expect(data.palette).toBe('Santorini')
+    expect(Option.isSome(getRes)).toBe(true)
+    const getResponse = Option.getOrThrow(getRes)
+    const getData = (await getResponse.json()) as {
+      seed: number
+      palette: string
     }
+    expect(getData.seed).toBe(108)
+    expect(getData.palette).toBe('Santorini')
 
     const postRes = await handleApiRequest(
       new Request('http://localhost:3000/api/town/generate', {
@@ -146,16 +147,15 @@ describe('Borgo Solare — Foldkit TEA & Effect Backend', () => {
         }),
       }),
     )
-    expect(postRes._tag).toBe('Some')
-    if (postRes._tag === 'Some') {
-      const data = (await postRes.value.json()) as {
-        seed: number
-        palette: string
-        timeOfDay: string
-      }
-      expect(data.seed).toBe(512)
-      expect(data.palette).toBe('Provence')
-      expect(data.timeOfDay).toBe('Midday')
+    expect(Option.isSome(postRes)).toBe(true)
+    const postResponse = Option.getOrThrow(postRes)
+    const postData = (await postResponse.json()) as {
+      seed: number
+      palette: string
+      timeOfDay: string
     }
+    expect(postData.seed).toBe(512)
+    expect(postData.palette).toBe('Provence')
+    expect(postData.timeOfDay).toBe('Midday')
   })
 })
