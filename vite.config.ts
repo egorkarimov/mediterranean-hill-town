@@ -60,6 +60,7 @@ const effectBackendApiPlugin = (): Plugin => ({
 })
 
 export default defineConfig({
+  base: process.env.BASE_PATH ?? '/',
   build: {
     chunkSizeWarningLimit: 1000,
   },
@@ -70,7 +71,11 @@ export default defineConfig({
       ssr: {
         serverEntry: '/src/entry.server.ts',
         clientEntry: '/src/entry.ts',
-        build: true,
+        build: {
+          prerender: {
+            paths: ['/'],
+          },
+        },
       },
     }),
   ],

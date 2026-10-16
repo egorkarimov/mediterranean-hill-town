@@ -1,30 +1,24 @@
-# Borgo Solare — Mediterranean Isometric Hill Town
+# Borgo Solare · Isometric Mediterranean Hill Town
 
-An interactive 3D animated isometric Mediterranean hill town artwork built with **Three.js**, powered by a **Bun + Effect** backend and a **Foldkit (TEA) Server-Side Rendered (SSR)** frontend.
+**Live Website:** [https://egorkarimov.github.io/mediterranean-hill-town/](https://egorkarimov.github.io/mediterranean-hill-town/)
 
-## Architecture
+An interactive, animated 3D isometric Mediterranean hill town artwork built with **Bun**, **Effect** (Backend & Domain Schemas), **Foldkit** (Elm-inspired Model-View-Update architecture with SSR + static prerendering + client hydration), and **Three.js**.
 
-- **Runtime & Server (`src/server/bunServer.ts`)**: **Bun** (`Bun.serve`) hosting static assets, Effect HTTP API endpoints, and the compiled Foldkit SSR Web Fetch handler (`dist/server/fetch.js`).
-- **Backend (`src/server/townService.ts`)**: **Effect 4 (`effect@4.0.0`)** `Context.Service` & `Layer` (`TownServiceLive`) providing:
-  - Per-request SSR `Flags` resolution from cookies and URL query parameters (`?palette=Santorini&time=GoldenHour&seed=42`).
-  - `GET /api/town` — current town snapshot & meteorological telemetry.
-  - `POST /api/town/generate` — Schema-validated procedural Mediterranean hill town generation.
-  - `POST /api/town/bells` — Campanile bronze bell chime telemetry.
-- **Frontend (`src/main.ts`, `src/entry.server.ts`, `src/entry.ts`)**: **Foldkit (`foldkit@0.168.0`)** with **Server-Side Rendering (`foldkit/experimental/server`)** and in-place client hydration (`Runtime.hydrate`):
-  - Single `Schema.Struct` `Model` & `Flags`.
-  - Past-tense fact `Message` union (`defineMessageUnion`) and pure exhaustive `update`.
-  - Explicit `Command.define` side effects (`SyncTownScene`, `PersistTownPreferences`, `RequestNewTownFromBackend`, `TriggerCampanileBells`, `ExpireBellResonance`).
-  - `Mount.defineStream` (`MountTownViewport`) binding the Three.js WebGL lifecycle (`Effect.acquireRelease`) to `#town-canvas-container`, pausing during DevTools time-travel via `viewStateChanges`, and streaming 3D raycast landmark clicks back into Foldkit as `SelectedDistrictFromCanvas` Messages.
-  - `Subscription.make` driving continuous solar elevation cycling when enabled.
-- **3D Artwork (`src/three/isometricTown.ts`)**: **Three.js** orthographic isometric diorama featuring:
-  - Multi-tiered sculpted limestone cliffs, coastal sea stacks, Roman viaduct bridge, and stepped cobblestone alleys.
-  - Hilltop **Duomo di Santa Maria** with ribbed majolica cupola, rose window, and **Campanile** with a swinging bronze bell & acoustic chime rings.
-  - Central **Piazza del Mercato** with an animated 3-tier marble fountain, café parasols, and warm overhead festoon string lights.
-  - Western Ridge **Mulino a Vento** (stone grain windmill) with 4 rotating timber-and-canvas sails.
-  - **Porto Vecchio & Faro** striped lighthouse with rotating volumetric light beam and 6 wooden **Gozzo** fishing boats (moored & actively sailing with wakes).
-  - Soaring seagull flock with flapping wings, swaying cypress & olive trees, rising chimney smoke puffs, and evening fireflies across 4 regional palettes (`Amalfi`, `CinqueTerre`, `Santorini`, `Provence`) and 4 times of day (`Dawn`, `Midday`, `GoldenHour`, `Starlight`).
+## Stack & Architecture
 
-## Getting Started
+- **Runtime:** [Bun](https://bun.sh)
+- **Backend & Shared Domain:** [Effect (`effect@4.0.0`)](https://effect.website) — `Schema.Class`, `Context.Service`, `Layer`, deterministic procedural Borgo telemetry generator, and HTTP routes (`/api/town`, `/api/town/generate`, `/api/town/bells`)
+- **Frontend & SSR:** [Foldkit (`foldkit@0.168.0`)](https://foldkit.dev) — `Runtime.makeProgram`, `Server.renderToString`, `Runtime.hydrate`, `Mount.defineStream`, `Command.define`, `Subscription.make`, and `@foldkit/vite-plugin` SSR + SSG prerendering
+- **3D Isometric Artwork:** [Three.js (`three@0.175.0`)](https://threejs.org) — Procedural terraced limestone cliffs, Roman stone viaduct, Duomo cathedral with majolica-tiled cupola and swinging bronze Campanile bell, Piazza del Sole with tiered fountain and festoon string lights, rotating windmill sails, striped Faro lighthouse with sweeping beam, bobbing & sailing Gozzo wooden boats with wake trails, wheeling seagulls, swaying cypresses & olive groves, chimney smoke, and nocturnal fireflies.
+
+## Features
+
+- **4 Regional Mediterranean Palettes:** Amalfi Terracotta, Santorini Caldera, Cinque Terre Pastel, and Tuscan Sunstone
+- **4 Solar Phases + Auto Solar Cycle:** Dawn Mist, High Noon, Golden Hour, and Starlit Night
+- **5 Isometric Camera Presets + Full Orbit/Zoom/Pan & Raycast Inspection:** Overview, Piazza & Duomo, Marina & Viaduct, Faro & Windmill, and Aerial Isometric
+- **Interactive Campanile Bell Chimes:** Ring the bronze cathedral bell to trigger visual shockwave rings and synthesized acoustic bell harmonics
+
+## Local Development
 
 ```bash
 # Install dependencies
@@ -33,10 +27,13 @@ bun install
 # Start Vite SSR + Effect API development server
 bun run dev
 
-# Run Foldkit Story & Effect API tests
+# Typecheck & run tests (Foldkit Story + Effect API tests)
+bun run typecheck
 bun run test
 
-# Build client + SSR bundles and start the production Bun + Effect server
+# Build production SSR + static prerendered bundle
 bun run build
+
+# Run production Bun + Effect SSR server
 bun run start
 ```

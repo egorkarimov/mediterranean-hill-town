@@ -15,6 +15,7 @@ import {
   TownSceneState,
   TownSnapshot,
   cameraPresetLabel,
+  createTownSnapshot,
   defaultLanternsForTime,
   defaultSunAngleForTime,
   paletteDisplayName,
@@ -160,6 +161,10 @@ export const RequestNewTownFromBackend = Command.define(
             err instanceof Error ? err.message : 'Network request failed',
         })
 
+        if (!response.ok) {
+          return yield* Effect.fail('Static host fallback')
+        }
+
         const json = yield* Effect.tryPromise({
           try: () => response.json(),
           catch: () => 'Invalid JSON from Effect backend',
@@ -171,8 +176,17 @@ export const RequestNewTownFromBackend = Command.define(
 
         return Message.SucceededGenerateTown({ snapshot })
       }).pipe(
-        Effect.catch(reason =>
-          Effect.succeed(Message.FailedGenerateTown({ reason: String(reason) })),
+        Effect.catch(() =>
+          Effect.sync(() => {
+            const nextSeed = Math.floor(100 + Math.random() * 8900)
+            const snapshot = createTownSnapshot({
+              seed: nextSeed,
+              palette,
+              timeOfDay,
+              renderedOn: 'Client',
+            })
+            return Message.SucceededGenerateTown({ snapshot })
+          }),
         ),
       ),
   },

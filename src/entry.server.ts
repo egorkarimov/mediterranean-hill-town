@@ -8,6 +8,8 @@ import {
   handleApiRequestEffect,
 } from './server/townService'
 
+export const prerenderPaths = ['/']
+
 export const renderDocument: Server.DocumentRenderer = (application, assets) =>
   Server.renderDocument(application, assets, {
     lang: 'en',
@@ -42,11 +44,15 @@ export const renderPage = (request: Request): Promise<Server.EntryResult> =>
         { flags },
       )
 
-      return Server.Rendered(renderedApplication, {
-        headers: {
-          'cache-control': 'private, no-store',
-          vary: 'cookie',
-        },
-      })
+      if (request.headers.get('cookie') !== null) {
+        return Server.Rendered(renderedApplication, {
+          headers: {
+            'cache-control': 'private, no-store',
+            vary: 'cookie',
+          },
+        })
+      }
+
+      return Server.Rendered(renderedApplication)
     }).pipe(Effect.provide(TownServiceLive)),
   )
