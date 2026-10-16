@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: bun install
 
+      - name: Tangle Loom Book (corpus -> src)
+        run: bun run tangle
+
       - name: Typecheck & Run Tests
         run: |
           bun run typecheck

@@ -14,6 +14,7 @@
         "three": "^0.175.0",
       },
       "devDependencies": {
+        "@athrio/loom": "^0.0.11",
         "@foldkit/vite-plugin": "0.27.1",
         "@tailwindcss/vite": "^4.1.4",
         "@types/bun": "latest",
@@ -27,6 +28,8 @@
     },
   },
   "packages": {
+    "@athrio/loom": ["@athrio/loom@0.0.11", "", { "bin": { "loom": "dist/main.js" } }, "sha512-J/A8Lj2DFh2TVxNP5lI6AfkRkSlI5jLH7Xqj0FCs9+cad1vaWwPqn7+FRehGTIxIRc54uMCnaRScDr10SEc+mQ=="],
+
     "@effect/platform-browser": ["@effect/platform-browser@4.0.0", "", { "peerDependencies": { "effect": "^4.0.0" } }, "sha512-OHo7EPpF3RVPiI+mjoU9yd05LdCdKPjzDXqs5wRgF9CsdVvwN76B0zgt54DxPUcvMYri1tVJOtLCVnK0tRkNQQ=="],
 
     "@effect/platform-node": ["@effect/platform-node@4.0.0", "", { "dependencies": { "@effect/platform-node-shared": "^4.0.0", "undici": "^8.11.2" }, "peerDependencies": { "effect": "^4.0.0", "redis": ">=5.0.0 <7.0.0" } }, "sha512-/L+4MUbl8FejPKLHLROYSOebvHnfixkP8KiblSD/DE5uH5xENZBHaux4nH6XMnRP+lr8ajpEJFS8sUrmmxFJeQ=="],
